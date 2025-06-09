@@ -167,8 +167,22 @@ h1 {
 
 .camera-actions {
   display: flex;
-  justify-content: space-between;
+  gap: 5px;
+  flex-wrap: wrap;
   margin-top: 10px;
+}
+
+.camera-actions button {
+  flex: 1;
+  min-width: 60px;
+}
+
+/* Help text */
+.help-text {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 5px;
+  display: block;
 }
 
 /* Form và controls */
@@ -286,6 +300,31 @@ button.danger:hover {
 .detection-info h4 {
   margin: 0 0 5px 0;
   color: #e74c3c;
+}
+
+/* Test Detection Items */
+.test-detection-item {
+  border-left: 4px solid #fd7e14;
+  background-color: #fff8f0;
+}
+
+.test-detection-item .detection-thumbnail {
+  border-color: #fd7e14;
+}
+
+.test-detection-item h4 {
+  color: #fd7e14;
+}
+
+.test-badge {
+  color: #fd7e14;
+  font-weight: bold;
+  font-size: 0.8rem;
+  background-color: #fed7aa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  margin-top: 5px;
 }
 
 /* Alerts */
@@ -678,4 +717,15 @@ button.danger:hover {
   padding: 4px 8px;
   background-color: #e8f4f8;
   border-radius: 4px;
+}
+
+/* Test Detection Button */
+.test-detection {
+  background-color: #fd7e14;
+  color: white;
+  font-size: 0.8rem;
+}
+
+.test-detection:hover {
+  background-color: #e8590c;
 }

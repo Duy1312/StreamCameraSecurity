@@ -110,16 +110,24 @@ def get_detection_results():
     for root, dirs, files in os.walk(UPLOAD_FOLDER):
         for file in files:
             if file.endswith('.jpg'):
-                camera_id = file.split('_')[0]
-                timestamp = file.split('_')[1].replace('.jpg', '')
+                # Parse filename: cam_1_1749441828_test.jpg or cam_1_1749441828.jpg
+                parts = file.replace('.jpg', '').split('_')
                 
-                results.append({
-                    "camera_id": camera_id,
-                    "timestamp": timestamp,
-                    "image_path": f"/static/detections/{file}",
-                    "camera_info": cameras.get(camera_id, {})
-                })
+                if len(parts) >= 3:
+                    camera_id = f"{parts[0]}_{parts[1]}"  # cam_1
+                    timestamp = parts[2]  # 1749441828
+                    is_test = len(parts) > 3 and parts[3] == 'test'
+                    
+                    results.append({
+                        "camera_id": camera_id,
+                        "timestamp": timestamp,
+                        "image_path": f"/static/detections/{file}",
+                        "camera_info": cameras.get(camera_id, {}),
+                        "test_mode": is_test
+                    })
     
+    # Sort by timestamp (newest first)
+    results.sort(key=lambda x: int(x['timestamp']), reverse=True)
     return jsonify(results)
 
 @app.route('/api/cameras', methods=['POST'])
@@ -179,6 +187,92 @@ def delete_camera(camera_id):
     
     return jsonify({"success": True})
 
+@app.route('/api/test-face-detection', methods=['POST'])
+def test_face_detection():
+    """API để test phát hiện khuôn mặt ngay lập tức"""
+    camera_id = request.json.get('camera_id')
+    
+    if not camera_id or camera_id not in cameras:
+        return jsonify({"error": "Camera không tồn tại"}), 400
+    
+    # Tạo frame giả có khuôn mặt
+    frame = simulate_camera_frame_with_face(camera_id)
+    
+    # Chuyển đổi sang thang độ xám
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # Phát hiện khuôn mặt
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+    
+    # Vẽ hình chữ nhật xung quanh khuôn mặt
+    for (x, y, w, h) in faces:
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+    
+    # Lưu ảnh
+    timestamp = int(time.time())
+    filename = f"{camera_id}_{timestamp}_test.jpg"
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    cv2.imwrite(filepath, frame)
+    
+    # Gửi thông báo qua WebSocket
+    detection_data = {
+        "camera_id": camera_id,
+        "timestamp": timestamp,
+        "image_path": f"/static/detections/{filename}",
+        "camera_info": cameras.get(camera_id, {}),
+        "test_mode": True
+    }
+    socketio.emit('face_detected', detection_data)
+    
+    return jsonify({
+        "success": True,
+        "message": "Test phát hiện khuôn mặt thành công",
+        "detection": detection_data
+    })
+
+def simulate_camera_frame(camera_id):
+    # Trong thực tế, bạn sẽ kết nối với camera IP và lấy frame thực
+    # Đây chỉ là mô phỏng để demo
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    
+    # Tăng tỷ lệ phát hiện cho demo
+    if np.random.random() < 0.3:  # 30% cơ hội có khuôn mặt (tăng từ 10%)
+        # Vẽ một hình tròn đại diện cho khuôn mặt
+        cv2.circle(frame, (320, 240), 100, (0, 0, 255), -1)
+        cv2.circle(frame, (280, 200), 20, (255, 255, 255), -1)  # Mắt trái
+        cv2.circle(frame, (360, 200), 20, (255, 255, 255), -1)  # Mắt phải
+        cv2.ellipse(frame, (320, 280), (60, 30), 0, 0, 180, (255, 255, 255), -1)  # Miệng
+    
+    # Thêm thông tin camera
+    camera_info = cameras.get(camera_id, {"name": f"Camera {camera_id}", "ip": "Unknown", "location": "Unknown"})
+    cv2.putText(frame, camera_info["name"], (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(frame, f"IP: {camera_info['ip']}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(frame, f"Location: {camera_info['location']}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
+    return frame
+
+def simulate_camera_frame_with_face(camera_id):
+    """Tạo frame giả luôn có khuôn mặt để test"""
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    
+    # Luôn thêm khuôn mặt để test
+    # Vẽ một hình tròn đại diện cho khuôn mặt
+    cv2.circle(frame, (320, 240), 100, (0, 0, 255), -1)
+    cv2.circle(frame, (280, 200), 20, (255, 255, 255), -1)  # Mắt trái
+    cv2.circle(frame, (360, 200), 20, (255, 255, 255), -1)  # Mắt phải
+    cv2.ellipse(frame, (320, 280), (60, 30), 0, 0, 180, (255, 255, 255), -1)  # Miệng
+    
+    # Thêm text "TEST FACE"
+    cv2.putText(frame, "TEST FACE", (250, 350), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    
+    # Thêm thông tin camera
+    camera_info = cameras.get(camera_id, {"name": f"Camera {camera_id}", "ip": "Unknown", "location": "Unknown"})
+    cv2.putText(frame, camera_info["name"], (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(frame, f"IP: {camera_info['ip']}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(frame, f"Location: {camera_info['location']}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
+    return frame
+
 # Xử lý phát hiện khuôn mặt
 def run_face_detection(schedule_id, camera_ids, duration):
     face_detection_active[schedule_id] = True
@@ -225,27 +319,6 @@ def run_face_detection(schedule_id, camera_ids, duration):
     
     if schedule_id in face_detection_schedule:
         face_detection_schedule[schedule_id]["status"] = "completed"
-
-def simulate_camera_frame(camera_id):
-    # Trong thực tế, bạn sẽ kết nối với camera IP và lấy frame thực
-    # Đây chỉ là mô phỏng để demo
-    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    
-    # Đôi khi thêm khuôn mặt để demo
-    if np.random.random() < 0.1:  # 10% cơ hội có khuôn mặt
-        # Vẽ một hình tròn đại diện cho khuôn mặt
-        cv2.circle(frame, (320, 240), 100, (0, 0, 255), -1)
-        cv2.circle(frame, (280, 200), 20, (255, 255, 255), -1)  # Mắt trái
-        cv2.circle(frame, (360, 200), 20, (255, 255, 255), -1)  # Mắt phải
-        cv2.ellipse(frame, (320, 280), (60, 30), 0, 0, 180, (255, 255, 255), -1)  # Miệng
-    
-    # Thêm thông tin camera
-    camera_info = cameras.get(camera_id, {"name": f"Camera {camera_id}", "ip": "Unknown", "location": "Unknown"})
-    cv2.putText(frame, camera_info["name"], (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-    cv2.putText(frame, f"IP: {camera_info['ip']}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.putText(frame, f"Location: {camera_info['location']}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
-    return frame
 
 # Khởi tạo dữ liệu
 load_cameras()

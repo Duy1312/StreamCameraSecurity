@@ -124,8 +124,12 @@
               <div class="auto-schedule-info">
                 <h4>Chế độ tự động</h4>
                 <p>
-                  Hệ thống sẽ tự động check 20 camera mỗi 60 phút cho đến khi
+                  Hệ thống sẽ tự động check 20 camera mỗi chu kỳ cho đến khi
                   check hết 400 camera.
+                </p>
+                <p>
+                  <strong>Lưu ý:</strong> Thời gian chu kỳ sẽ áp dụng cho cả
+                  phát hiện và nghỉ giữa các chu kỳ.
                 </p>
                 <div class="progress-info">
                   <div class="progress-stats">
@@ -148,9 +152,7 @@
                 </div>
               </div>
               <div class="form-group">
-                <label for="auto-interval"
-                  >Khoảng thời gian giữa các chu kỳ (phút)</label
-                >
+                <label for="auto-interval">Thời gian mỗi chu kỳ (phút)</label>
                 <input
                   type="number"
                   id="auto-interval"
@@ -158,6 +160,9 @@
                   min="30"
                   max="180"
                 />
+                <small class="help-text"
+                  >Thời gian phát hiện cho mỗi nhóm 20 camera</small
+                >
               </div>
               <button id="start-auto-detection-btn">
                 Bắt đầu phát hiện tự động
@@ -299,6 +304,7 @@
       let autoDetectionInterval = null;
       let autoDetectionProgress = 0;
       let currentDetectionTimer = null;
+      let countdownInterval = null; // Add this to track countdown timer
 
       // DOM Elements
       const cameraList = document.getElementById("camera-list");
@@ -437,9 +443,14 @@
       // Fetch detection results
       async function fetchDetectionResults() {
         try {
+          console.log("Fetching detection results...");
           const response = await fetch("/api/detection-results");
-          detectionResults = await response.json();
+          const data = await response.json();
+          console.log("Detection results received:", data);
+
+          detectionResults = data;
           renderDetectionResults();
+          console.log("Detection results rendered");
         } catch (error) {
           console.error("Error fetching detection results:", error);
         }
@@ -657,6 +668,12 @@
           currentDetectionTimer = null;
         }
 
+        // Clear countdown timer
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
+
         // Clear current auto detection cameras from streams
         activeStreams.clear();
         saveActiveStreams();
@@ -667,6 +684,9 @@
         stopAutoDetectionBtn.style.display = "none";
 
         activeDetection.style.display = "none";
+
+        // Reset time display
+        timeRemainingEl.textContent = "--:--";
 
         showToast("Đã dừng phát hiện tự động", "info");
       }
@@ -732,7 +752,9 @@
           activeDetection.style.display = "block";
           detectionStatus.textContent = `Đang phát hiện khuôn mặt tự động: Camera ${
             startIndex + 1
-          } - ${endIndex} (Chu kỳ ${Math.ceil(endIndex / 20)}/20)`;
+          } - ${endIndex} (Chu kỳ ${Math.ceil(
+            endIndex / 20
+          )}/20) - ${interval} phút`;
 
           // Start detection for this cycle
           try {
@@ -743,15 +765,15 @@
               },
               body: JSON.stringify({
                 camera_ids: camerasForThisCycle,
-                duration: 60, // Fixed 60 minutes for auto mode
+                duration: interval, // Use interval time instead of fixed 60 minutes
               }),
             });
 
             const result = await response.json();
 
             if (result.schedule_id) {
-              // Start countdown timer
-              startCountdownTimer(60);
+              // Start countdown timer with user-selected interval
+              startCountdownTimer(interval);
 
               // Wait for detection to complete
               currentDetectionTimer = setTimeout(() => {
@@ -777,7 +799,7 @@
                   updateActiveCount();
                   activeDetection.style.display = "none";
                 }
-              }, 60 * 60 * 1000); // 60 minutes
+              }, interval * 60 * 1000); // Use interval time in milliseconds
             }
           } catch (error) {
             console.error("Error in auto detection cycle:", error);
@@ -794,6 +816,12 @@
 
       // Start countdown timer
       function startCountdownTimer(minutes) {
+        // Clear any existing countdown timer
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
+
         let timeLeft = minutes * 60; // Convert to seconds
 
         const updateTimer = () => {
@@ -805,14 +833,21 @@
 
           if (timeLeft <= 0) {
             timeRemainingEl.textContent = "00:00";
+            if (countdownInterval) {
+              clearInterval(countdownInterval);
+              countdownInterval = null;
+            }
             return;
           }
 
           timeLeft--;
-          setTimeout(updateTimer, 1000);
         };
 
+        // Start the countdown immediately
         updateTimer();
+
+        // Then update every second
+        countdownInterval = setInterval(updateTimer, 1000);
       }
 
       // Toggle camera stream
@@ -910,6 +945,9 @@
                 <button class="secondary" onclick="event.stopPropagation(); toggleFullscreen('${
                   camera.id
                 }')">Phóng to</button>
+                <button class="test-detection" onclick="event.stopPropagation(); testFaceDetection('${
+                  camera.id
+                }')">🧪 Test</button>
                 ${
                   !isAutoMode
                     ? `<button class="danger" onclick="event.stopPropagation(); removeCameraFromStream('${camera.id}')">Dừng</button>`
@@ -932,40 +970,65 @@
 
       // Render detection results
       function renderDetectionResults() {
+        console.log(
+          "Rendering detection results. Count:",
+          detectionResults.length
+        );
         detectionResults_el.innerHTML = "";
 
         if (detectionResults.length === 0) {
+          console.log("No detection results to display");
           document.getElementById("detection-alert").style.display = "block";
           return;
         }
 
+        console.log("Hiding detection alert, showing results");
         document.getElementById("detection-alert").style.display = "none";
 
         // Sắp xếp theo thời gian mới nhất
         detectionResults.sort((a, b) => b.timestamp - a.timestamp);
 
-        detectionResults.forEach((result) => {
+        detectionResults.forEach((result, index) => {
+          console.log(`Rendering detection ${index}:`, result);
           const camera = cameras[result.camera_id];
-          if (!camera) return;
+          if (!camera) {
+            console.warn("Camera not found for result:", result.camera_id);
+            return;
+          }
 
-          const date = new Date(parseInt(result.timestamp) * 1000);
+          // Handle timestamp - could be string or number
+          let timestamp = result.timestamp;
+          if (typeof timestamp === "string") {
+            timestamp = parseInt(timestamp);
+          }
+
+          const date = new Date(timestamp * 1000);
           const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
 
+          const isTestMode = result.test_mode ? true : false;
+
           const detectionItem = document.createElement("div");
-          detectionItem.className = "detection-item";
+          detectionItem.className = `detection-item ${
+            isTestMode ? "test-detection-item" : ""
+          }`;
 
           detectionItem.innerHTML = `
-                    <img src="${result.image_path}" class="detection-thumbnail">
-                    <div class="detection-info">
-                        <h4>${camera.name}</h4>
-                        <p>Vị trí: ${camera.location}</p>
-                        <p>Thời gian: ${formattedDate}</p>
-                        <p>IP: ${camera.ip}</p>
-                    </div>
-                `;
+            <img src="${
+              result.image_path
+            }" class="detection-thumbnail" alt="Detection result">
+            <div class="detection-info">
+              <h4>${camera.name} ${isTestMode ? "🧪 (TEST)" : ""}</h4>
+              <p>Vị trí: ${camera.location}</p>
+              <p>Thời gian: ${formattedDate}</p>
+              <p>IP: ${camera.ip}</p>
+              ${isTestMode ? '<p class="test-badge">Chế độ test</p>' : ""}
+            </div>
+          `;
 
           detectionResults_el.appendChild(detectionItem);
         });
+
+        console.log("Detection results rendering completed");
       }
 
       // Update active camera count
@@ -1071,12 +1134,26 @@
 
       // Stop detection
       stopDetectionBtn.addEventListener("click", () => {
-        // Ở đây chúng ta giả định rằng backend có API để dừng phát hiện
-        // Trong thực tế bạn sẽ gọi API đó
+        // Clear detection timer
+        if (currentDetectionTimer) {
+          clearTimeout(currentDetectionTimer);
+          currentDetectionTimer = null;
+        }
+
+        // Clear countdown timer
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
 
         // Update UI
         activeDetection.style.display = "none";
         scheduleDetectionBtn.disabled = false;
+
+        // Reset time display
+        timeRemainingEl.textContent = "--:--";
+
+        showToast("Đã dừng phát hiện khuôn mặt", "info");
       });
 
       // Toggle fullscreen
@@ -1107,16 +1184,23 @@
 
       socket.on("face_detected", (data) => {
         console.log("Face detected:", data);
+
+        // Add to detection results immediately
         detectionResults.unshift(data);
         renderDetectionResults();
 
         // Show notification
         const camera = cameras[data.camera_id];
         if (camera) {
+          const isTestMode = data.test_mode ? " (TEST)" : "";
+          const message = `Phát hiện khuôn mặt${isTestMode} trên camera ${camera.name} tại ${camera.location}`;
+
+          showToast(message, data.test_mode ? "info" : "success");
+
           // Browser notification
           if (Notification.permission === "granted") {
-            new Notification("Phát hiện khuôn mặt", {
-              body: `Phát hiện khuôn mặt trên camera ${camera.name} tại ${camera.location}`,
+            new Notification("Phát hiện khuôn mặt" + isTestMode, {
+              body: message,
               icon: data.image_path,
             });
           }
@@ -1489,6 +1573,55 @@
         } catch (error) {
           console.error("Error deleting camera:", error);
           showToast("Có lỗi xảy ra khi xóa camera", "error");
+        }
+      }
+
+      // Test face detection for a specific camera
+      async function testFaceDetection(cameraId) {
+        try {
+          const camera = cameras[cameraId];
+          if (!camera) {
+            showToast("Camera không tồn tại", "error");
+            return;
+          }
+
+          showToast(
+            `Đang test phát hiện khuôn mặt cho ${camera.name}...`,
+            "info"
+          );
+
+          const response = await fetch("/api/test-face-detection", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ camera_id: cameraId }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showToast(
+              `✅ Test thành công! Đã phát hiện khuôn mặt trên ${camera.name}`,
+              "success"
+            );
+
+            // Automatically switch to detection results tab
+            const detectionsTab = document.querySelector(
+              '.main-content .tab-item[data-tab="detections"]'
+            );
+            if (detectionsTab) {
+              detectionsTab.click();
+            }
+
+            // Force refresh detection results
+            await fetchDetectionResults();
+          } else {
+            showToast(`❌ Test thất bại: ${result.error}`, "error");
+          }
+        } catch (error) {
+          console.error("Error testing face detection:", error);
+          showToast("Có lỗi xảy ra khi test phát hiện khuôn mặt", "error");
         }
       }
     </script>
