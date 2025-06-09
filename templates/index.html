@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hệ thống Camera An ninh</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='fonts/roboto.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+  </head>
+  <body>
+    <header>
+      <div class="header-content">
+        <h1>Hệ thống Camera An ninh</h1>
+        <div class="header-actions">
+          <span id="active-camera-count">0/20 Camera đang hoạt động</span>
+          <button
+            id="refresh-cameras"
+            style="margin-left: 10px"
+            class="secondary"
+          >
+            Làm mới
+          </button>
+          <button
+            id="stop-all-cameras"
+            style="margin-left: 10px"
+            class="danger"
+          >
+            Dừng tất cả
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="container">
+      <div class="dashboard">
+        <div class="sidebar">
+          <div class="tabs">
+            <div class="tab-item active" data-tab="cameras">
+              Danh sách Camera
+            </div>
+            <div class="tab-item" data-tab="detection">Phát hiện khuôn mặt</div>
+          </div>
+
+          <div class="tab-content active" id="cameras-tab">
+            <div class="form-group">
+              <input
+                type="text"
+                id="camera-search"
+                placeholder="Tìm kiếm camera..."
+              />
+            </div>
+            <div class="camera-list" id="camera-list">
+              <!-- Camera list will be populated here -->
+            </div>
+          </div>
+
+          <div class="tab-content" id="detection-tab">
+            <h3>Lên lịch phát hiện khuôn mặt</h3>
+            <div class="form-group">
+              <label for="detection-cameras">Chọn camera (tối đa 20)</label>
+              <select id="detection-cameras" multiple size="10">
+                <!-- Camera options will be populated here -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detection-duration">Thời gian (phút)</label>
+              <input
+                type="number"
+                id="detection-duration"
+                value="60"
+                min="1"
+                max="120"
+              />
+            </div>
+            <button id="schedule-detection-btn">Bắt đầu phát hiện</button>
+
+            <div
+              class="active-detection"
+              style="margin-top: 20px; display: none"
+            >
+              <h4>Đang phát hiện khuôn mặt</h4>
+              <p id="detection-status"></p>
+              <button id="stop-detection-btn" class="danger">
+                Dừng phát hiện
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="main-content">
+          <div class="tabs">
+            <div class="tab-item active" data-tab="stream">Luồng camera</div>
+            <div class="tab-item" data-tab="detections">Kết quả phát hiện</div>
+          </div>
+
+          <div class="tab-content active" id="stream-tab">
+            <div class="alert alert-info" id="stream-alert">
+              Chọn camera từ danh sách bên trái để bắt đầu stream. Tối đa 20
+              camera có thể được stream cùng lúc.
+            </div>
+            <div class="camera-grid" id="camera-grid">
+              <!-- Camera streams will be displayed here -->
+            </div>
+          </div>
+
+          <div class="tab-content" id="detections-tab">
+            <div class="alert alert-info" id="detection-alert">
+              Kết quả phát hiện khuôn mặt sẽ hiển thị ở đây.
+            </div>
+            <div class="detection-results" id="detection-results">
+              <!-- Detection results will be displayed here -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Kết nối Socket.IO
+      const socket = io();
+
+      // Các biến toàn cục
+      let cameras = {};
+      let activeStreams = new Set();
+      let detectionResults = [];
+
+      // DOM Elements
+      const cameraList = document.getElementById("camera-list");
+      const cameraGrid = document.getElementById("camera-grid");
+      const detectionResults_el = document.getElementById("detection-results");
+      const activeCountEl = document.getElementById("active-camera-count");
+      const cameraSearch = document.getElementById("camera-search");
+      const detectionCamerasSelect =
+        document.getElementById("detection-cameras");
+      const detectionDuration = document.getElementById("detection-duration");
+      const scheduleDetectionBtn = document.getElementById(
+        "schedule-detection-btn"
+      );
+      const stopDetectionBtn = document.getElementById("stop-detection-btn");
+      const detectionStatus = document.getElementById("detection-status");
+      const activeDetection = document.querySelector(".active-detection");
+
+      // Tab navigation
+      document.querySelectorAll(".tab-item").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const tabName = tab.getAttribute("data-tab");
+          const tabContainer = tab.closest(".sidebar, .main-content");
+
+          // Activate tab chỉ trong container hiện tại
+          tabContainer
+            .querySelectorAll(".tab-item")
+            .forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+
+          // Show tab content chỉ trong container hiện tại
+          tabContainer
+            .querySelectorAll(".tab-content")
+            .forEach((c) => c.classList.remove("active"));
+          tabContainer.querySelector(`#${tabName}-tab`).classList.add("active");
+        });
+      });
+
+      // Fetch cameras
+      async function fetchCameras() {
+        try {
+          const response = await fetch("/api/cameras");
+          cameras = await response.json();
+          renderCameraList();
+          populateDetectionCameras();
+          return true;
+        } catch (error) {
+          console.error("Error fetching cameras:", error);
+          return false;
+        }
+      }
+
+      // Fetch active streams
+      async function fetchActiveStreams() {
+        try {
+          const response = await fetch("/api/active-streams");
+          const streams = await response.json();
+
+          // Load from localStorage first
+          const savedStreams = localStorage.getItem("activeStreams");
+          if (savedStreams) {
+            activeStreams = new Set(JSON.parse(savedStreams));
+          }
+
+          // Merge with server data
+          streams.forEach((streamId) => activeStreams.add(streamId));
+
+          // If we have saved streams but server doesn't, sync with server
+          if (savedStreams && streams.length === 0) {
+            activeStreams.forEach(async (cameraId) => {
+              await fetch("/api/start-stream", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ camera_id: cameraId }),
+              });
+            });
+          }
+
+          // Save current state
+          saveActiveStreams();
+
+          updateActiveCount();
+          renderCameraGrid();
+          renderCameraList(); // Re-render để cập nhật trạng thái active
+        } catch (error) {
+          console.error("Error fetching active streams:", error);
+        }
+      }
+
+      // Save active streams to localStorage
+      function saveActiveStreams() {
+        localStorage.setItem(
+          "activeStreams",
+          JSON.stringify([...activeStreams])
+        );
+      }
+
+      // Fetch detection results
+      async function fetchDetectionResults() {
+        try {
+          const response = await fetch("/api/detection-results");
+          detectionResults = await response.json();
+          renderDetectionResults();
+        } catch (error) {
+          console.error("Error fetching detection results:", error);
+        }
+      }
+
+      // Render camera list
+      function renderCameraList() {
+        cameraList.innerHTML = "";
+
+        const searchTerm = cameraSearch.value.toLowerCase();
+
+        Object.values(cameras)
+          .filter((camera) => {
+            return (
+              camera.name.toLowerCase().includes(searchTerm) ||
+              camera.location.toLowerCase().includes(searchTerm) ||
+              camera.ip.toLowerCase().includes(searchTerm)
+            );
+          })
+          .forEach((camera) => {
+            const isActive = activeStreams.has(camera.id);
+
+            const cameraItem = document.createElement("div");
+            cameraItem.className = `camera-item ${isActive ? "active" : ""}`;
+            cameraItem.dataset.id = camera.id;
+
+            cameraItem.innerHTML = `
+                        <div>
+                            <span class="camera-status ${
+                              camera.status === "online"
+                                ? "status-online"
+                                : "status-offline"
+                            }"></span>
+                            ${camera.name}
+                        </div>
+                        <div class="camera-item-location">${
+                          camera.location
+                        }</div>
+                    `;
+
+            cameraItem.addEventListener("click", () =>
+              addCameraToStream(camera.id)
+            );
+
+            cameraList.appendChild(cameraItem);
+          });
+      }
+
+      // Populate detection cameras select
+      function populateDetectionCameras() {
+        detectionCamerasSelect.innerHTML = "";
+
+        Object.values(cameras).forEach((camera) => {
+          const option = document.createElement("option");
+          option.value = camera.id;
+          option.textContent = `${camera.name} (${camera.location})`;
+          detectionCamerasSelect.appendChild(option);
+        });
+      }
+
+      // Toggle camera stream
+      async function toggleCameraStream(cameraId) {
+        try {
+          if (activeStreams.has(cameraId)) {
+            // Stop stream
+            await fetch("/api/stop-stream", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ camera_id: cameraId }),
+            });
+
+            activeStreams.delete(cameraId);
+          } else {
+            // Check if we're at the limit
+            if (activeStreams.size >= 20) {
+              alert(
+                "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước."
+              );
+              return;
+            }
+
+            // Start stream
+            await fetch("/api/start-stream", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ camera_id: cameraId }),
+            });
+
+            activeStreams.add(cameraId);
+          }
+
+          // Save to localStorage
+          saveActiveStreams();
+
+          renderCameraList();
+          renderCameraGrid();
+          updateActiveCount();
+        } catch (error) {
+          console.error("Error toggling camera stream:", error);
+        }
+      }
+
+      // Render camera grid
+      function renderCameraGrid() {
+        console.log("Rendering camera grid, active streams:", [
+          ...activeStreams,
+        ]);
+        cameraGrid.innerHTML = "";
+
+        if (activeStreams.size === 0) {
+          document.getElementById("stream-alert").style.display = "block";
+          return;
+        }
+
+        document.getElementById("stream-alert").style.display = "none";
+
+        [...activeStreams].forEach((cameraId) => {
+          const camera = cameras[cameraId];
+          if (!camera) {
+            console.warn("Camera not found:", cameraId);
+            return;
+          }
+
+          const cameraCard = document.createElement("div");
+          cameraCard.className = "camera-card";
+
+          cameraCard.innerHTML = `
+            <div class="camera-feed">
+              <img src="/static/images/camera-placeholder.svg" alt="${camera.name}" id="feed-${camera.id}">
+            </div>
+            <div class="camera-info">
+              <h3>${camera.name}</h3>
+              <div class="camera-details">IP: ${camera.ip}</div>
+              <div class="camera-details">Vị trí: ${camera.location}</div>
+              <div class="camera-actions">
+                <button class="secondary" onclick="event.stopPropagation(); toggleFullscreen('${camera.id}')">Phóng to</button>
+                <button class="danger" onclick="event.stopPropagation(); removeCameraFromStream('${camera.id}')">Dừng</button>
+              </div>
+            </div>
+          `;
+
+          cameraGrid.appendChild(cameraCard);
+
+          // Trong thực tế, bạn sẽ kết nối với stream thực từ camera
+          // Đây là mô phỏng bằng cách cập nhật ảnh mỗi 1 giây
+          simulateCameraFeed(camera.id);
+        });
+      }
+
+      // Render detection results
+      function renderDetectionResults() {
+        detectionResults_el.innerHTML = "";
+
+        if (detectionResults.length === 0) {
+          document.getElementById("detection-alert").style.display = "block";
+          return;
+        }
+
+        document.getElementById("detection-alert").style.display = "none";
+
+        // Sắp xếp theo thời gian mới nhất
+        detectionResults.sort((a, b) => b.timestamp - a.timestamp);
+
+        detectionResults.forEach((result) => {
+          const camera = cameras[result.camera_id];
+          if (!camera) return;
+
+          const date = new Date(parseInt(result.timestamp) * 1000);
+          const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+
+          const detectionItem = document.createElement("div");
+          detectionItem.className = "detection-item";
+
+          detectionItem.innerHTML = `
+                    <img src="${result.image_path}" class="detection-thumbnail">
+                    <div class="detection-info">
+                        <h4>${camera.name}</h4>
+                        <p>Vị trí: ${camera.location}</p>
+                        <p>Thời gian: ${formattedDate}</p>
+                        <p>IP: ${camera.ip}</p>
+                    </div>
+                `;
+
+          detectionResults_el.appendChild(detectionItem);
+        });
+      }
+
+      // Update active camera count
+      function updateActiveCount() {
+        activeCountEl.textContent = `${activeStreams.size}/20 Camera đang hoạt động`;
+      }
+
+      // Simulate camera feed
+      function simulateCameraFeed(cameraId) {
+        const feedEl = document.getElementById(`feed-${cameraId}`);
+        if (!feedEl) return;
+
+        // Mô phỏng cập nhật ảnh từ camera
+        // Trong thực tế, bạn sẽ kết nối với stream thực từ camera
+        let counter = 0;
+        const interval = setInterval(() => {
+          // Kiểm tra xem camera còn trong danh sách active không
+          if (!activeStreams.has(cameraId)) {
+            clearInterval(interval);
+            return;
+          }
+
+          // Kiểm tra xem element còn tồn tại không
+          const el = document.getElementById(`feed-${cameraId}`);
+          if (!el) {
+            clearInterval(interval);
+            return;
+          }
+
+          // Mô phỏng ảnh thay đổi
+          counter++;
+          // Trong thực tế bạn sẽ lấy frame thực từ camera
+          // Ở đây chúng ta chỉ thay đổi timestamp để mô phỏng
+          el.src = `/static/images/camera-placeholder.svg?t=${Date.now()}`;
+        }, 1000);
+      }
+
+      // Schedule face detection
+      scheduleDetectionBtn.addEventListener("click", async () => {
+        const selectedCameras = Array.from(
+          detectionCamerasSelect.selectedOptions
+        ).map((option) => option.value);
+        const duration = parseInt(detectionDuration.value);
+
+        if (selectedCameras.length === 0) {
+          alert("Vui lòng chọn ít nhất 1 camera.");
+          return;
+        }
+
+        if (selectedCameras.length > 20) {
+          alert("Không thể phát hiện quá 20 camera cùng lúc.");
+          return;
+        }
+
+        if (isNaN(duration) || duration < 1 || duration > 120) {
+          alert("Thời gian phải từ 1 đến 120 phút.");
+          return;
+        }
+
+        try {
+          const response = await fetch("/api/schedule-detection", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              camera_ids: selectedCameras,
+              duration: duration,
+            }),
+          });
+
+          const result = await response.json();
+
+          if (result.schedule_id) {
+            // Show active detection UI
+            activeDetection.style.display = "block";
+            detectionStatus.textContent = `Đang phát hiện khuôn mặt trên ${selectedCameras.length} camera trong ${duration} phút.`;
+
+            // Disable schedule button
+            scheduleDetectionBtn.disabled = true;
+
+            // Set a timer to update UI when detection completes
+            setTimeout(() => {
+              activeDetection.style.display = "none";
+              scheduleDetectionBtn.disabled = false;
+              fetchDetectionResults();
+            }, duration * 60 * 1000);
+          }
+        } catch (error) {
+          console.error("Error scheduling detection:", error);
+        }
+      });
+
+      // Stop detection
+      stopDetectionBtn.addEventListener("click", () => {
+        // Ở đây chúng ta giả định rằng backend có API để dừng phát hiện
+        // Trong thực tế bạn sẽ gọi API đó
+
+        // Update UI
+        activeDetection.style.display = "none";
+        scheduleDetectionBtn.disabled = false;
+      });
+
+      // Toggle fullscreen
+      function toggleFullscreen(cameraId) {
+        const feedEl = document.getElementById(`feed-${cameraId}`);
+        if (!feedEl) return;
+
+        if (!document.fullscreenElement) {
+          feedEl.requestFullscreen().catch((err) => {
+            console.error(
+              `Error attempting to enable fullscreen: ${err.message}`
+            );
+          });
+        } else {
+          document.exitFullscreen();
+        }
+      }
+
+      // Search functionality
+      cameraSearch.addEventListener("input", () => {
+        renderCameraList();
+      });
+
+      // Socket.IO events
+      socket.on("connect", () => {
+        console.log("Connected to server");
+      });
+
+      socket.on("face_detected", (data) => {
+        console.log("Face detected:", data);
+        detectionResults.unshift(data);
+        renderDetectionResults();
+
+        // Show notification
+        const camera = cameras[data.camera_id];
+        if (camera) {
+          // Browser notification
+          if (Notification.permission === "granted") {
+            new Notification("Phát hiện khuôn mặt", {
+              body: `Phát hiện khuôn mặt trên camera ${camera.name} tại ${camera.location}`,
+              icon: data.image_path,
+            });
+          }
+        }
+      });
+
+      // Refresh cameras
+      async function refreshCameras() {
+        await fetchCameras();
+        await fetchActiveStreams();
+      }
+
+      // Stop all cameras
+      async function stopAllCameras() {
+        const camerasToStop = [...activeStreams];
+        for (const cameraId of camerasToStop) {
+          await removeCameraFromStream(cameraId);
+        }
+      }
+
+      // Initialization
+      document.addEventListener("DOMContentLoaded", async () => {
+        // Load cameras first
+        await fetchCameras();
+
+        // Then load active streams and render
+        await fetchActiveStreams();
+
+        // Load detection results
+        fetchDetectionResults();
+
+        // Refresh cameras button
+        document
+          .getElementById("refresh-cameras")
+          .addEventListener("click", refreshCameras);
+
+        // Stop all cameras button
+        document
+          .getElementById("stop-all-cameras")
+          .addEventListener("click", stopAllCameras);
+
+        // Cập nhật mỗi 30 giây
+        setInterval(() => {
+          fetchDetectionResults();
+        }, 30000);
+
+        // Yêu cầu quyền thông báo
+        if (
+          Notification.permission !== "granted" &&
+          Notification.permission !== "denied"
+        ) {
+          Notification.requestPermission();
+        }
+      });
+
+      // Add camera to stream (without removing others)
+      async function addCameraToStream(cameraId) {
+        try {
+          // Check if camera is already streaming
+          if (activeStreams.has(cameraId)) {
+            return; // Already streaming, do nothing
+          }
+
+          // Check if we're at the limit
+          if (activeStreams.size >= 20) {
+            alert(
+              "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước."
+            );
+            return;
+          }
+
+          // Start stream
+          await fetch("/api/start-stream", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ camera_id: cameraId }),
+          });
+
+          activeStreams.add(cameraId);
+
+          // Save to localStorage
+          saveActiveStreams();
+
+          renderCameraList();
+          renderCameraGrid();
+          updateActiveCount();
+        } catch (error) {
+          console.error("Error adding camera to stream:", error);
+        }
+      }
+
+      // Remove camera from stream
+      async function removeCameraFromStream(cameraId) {
+        try {
+          if (!activeStreams.has(cameraId)) {
+            return; // Not streaming, do nothing
+          }
+
+          // Stop stream
+          await fetch("/api/stop-stream", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ camera_id: cameraId }),
+          });
+
+          activeStreams.delete(cameraId);
+
+          // Save to localStorage
+          saveActiveStreams();
+
+          renderCameraList();
+          renderCameraGrid();
+          updateActiveCount();
+        } catch (error) {
+          console.error("Error removing camera from stream:", error);
+        }
+      }
+    </script>
+  </body>
+</html>

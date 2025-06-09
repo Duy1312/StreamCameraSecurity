@@ -1,0 +1,21 @@
+<svg width="640" height="480" viewBox="0 0 640 480" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="640" height="480" fill="#333"/>
+  <rect x="50" y="50" width="540" height="380" fill="#222" stroke="#555" stroke-width="2"/>
+  
+  <!-- Camera lens -->
+  <circle cx="320" cy="240" r="80" fill="#444" stroke="#666" stroke-width="3"/>
+  <circle cx="320" cy="240" r="60" fill="#222" stroke="#777" stroke-width="2"/>
+  <circle cx="320" cy="240" r="20" fill="#000"/>
+  
+  <!-- Camera icon -->
+  <rect x="280" y="100" width="80" height="50" rx="5" fill="#555"/>
+  <rect x="290" y="110" width="60" height="30" rx="3" fill="#666"/>
+  <circle cx="320" cy="125" r="8" fill="#333"/>
+  
+  <!-- Status indicator -->
+  <circle cx="580" cy="60" r="8" fill="#4CAF50"/>
+  
+  <!-- Text -->
+  <text x="320" y="400" font-family="Arial, sans-serif" font-size="24" fill="#999" text-anchor="middle">📹 Camera Feed</text>
+  <text x="320" y="430" font-family="Arial, sans-serif" font-size="16" fill="#777" text-anchor="middle">Waiting for connection...</text>
+</svg>
