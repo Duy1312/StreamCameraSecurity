@@ -122,6 +122,63 @@ def get_detection_results():
     
     return jsonify(results)
 
+@app.route('/api/cameras', methods=['POST'])
+def add_camera():
+    data = request.json
+    camera_id = f"cam_{len(cameras) + 1}"
+    
+    # Validate required fields
+    required_fields = ['name', 'ip', 'location']
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({"error": f"Thiếu trường {field}"}), 400
+    
+    cameras[camera_id] = {
+        "id": camera_id,
+        "name": data['name'],
+        "ip": data['ip'],
+        "location": data['location'],
+        "status": data.get('status', 'offline')
+    }
+    
+    save_cameras()
+    return jsonify({"success": True, "camera": cameras[camera_id]})
+
+@app.route('/api/cameras/<camera_id>', methods=['PUT'])
+def update_camera(camera_id):
+    if camera_id not in cameras:
+        return jsonify({"error": "Camera không tồn tại"}), 404
+    
+    data = request.json
+    
+    # Update camera data
+    if 'name' in data:
+        cameras[camera_id]['name'] = data['name']
+    if 'ip' in data:
+        cameras[camera_id]['ip'] = data['ip']
+    if 'location' in data:
+        cameras[camera_id]['location'] = data['location']
+    if 'status' in data:
+        cameras[camera_id]['status'] = data['status']
+    
+    save_cameras()
+    return jsonify({"success": True, "camera": cameras[camera_id]})
+
+@app.route('/api/cameras/<camera_id>', methods=['DELETE'])
+def delete_camera(camera_id):
+    if camera_id not in cameras:
+        return jsonify({"error": "Camera không tồn tại"}), 404
+    
+    # Remove from active streams if streaming
+    if camera_id in active_streams:
+        active_streams.remove(camera_id)
+    
+    # Delete camera
+    del cameras[camera_id]
+    save_cameras()
+    
+    return jsonify({"success": True})
+
 # Xử lý phát hiện khuôn mặt
 def run_face_detection(schedule_id, camera_ids, duration):
     face_detection_active[schedule_id] = True

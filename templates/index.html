@@ -46,6 +46,7 @@
               Danh sách Camera
             </div>
             <div class="tab-item" data-tab="detection">Phát hiện khuôn mặt</div>
+            <div class="tab-item" data-tab="manage">Quản lý Camera</div>
           </div>
 
           <div class="tab-content active" id="cameras-tab">
@@ -92,6 +93,68 @@
               </button>
             </div>
           </div>
+
+          <div class="tab-content" id="manage-tab">
+            <h3>Quản lý Camera</h3>
+
+            <!-- Form thêm/sửa camera -->
+            <div class="camera-form" id="camera-form">
+              <h4 id="form-title">Thêm Camera Mới</h4>
+              <div class="form-group">
+                <label for="camera-name">Tên Camera</label>
+                <input
+                  type="text"
+                  id="camera-name"
+                  placeholder="VD: Camera Cổng Chính"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="camera-ip">Địa chỉ IP</label>
+                <input
+                  type="text"
+                  id="camera-ip"
+                  placeholder="VD: 192.168.1.100"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="camera-location">Vị trí</label>
+                <input
+                  type="text"
+                  id="camera-location"
+                  placeholder="VD: Khu vực A, Phòng 101"
+                  required
+                />
+              </div>
+              <div class="form-group">
+                <label for="camera-status">Trạng thái</label>
+                <select id="camera-status">
+                  <option value="offline">Offline</option>
+                  <option value="online">Online</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button type="button" id="save-camera-btn">Lưu Camera</button>
+                <button
+                  type="button"
+                  id="cancel-edit-btn"
+                  class="secondary"
+                  style="display: none"
+                >
+                  Hủy
+                </button>
+              </div>
+            </div>
+
+            <!-- Danh sách camera để quản lý -->
+            <div class="camera-management">
+              <h4>Danh sách Camera (Quản lý)</h4>
+              <div class="management-list" id="management-list">
+                <!-- Camera management items will be populated here -->
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="main-content">
@@ -131,6 +194,9 @@
       let activeStreams = new Set();
       let detectionResults = [];
 
+      // Camera Management Variables
+      let currentEditingCamera = null;
+
       // DOM Elements
       const cameraList = document.getElementById("camera-list");
       const cameraGrid = document.getElementById("camera-grid");
@@ -146,6 +212,17 @@
       const stopDetectionBtn = document.getElementById("stop-detection-btn");
       const detectionStatus = document.getElementById("detection-status");
       const activeDetection = document.querySelector(".active-detection");
+
+      // DOM Elements for camera management
+      const cameraForm = document.getElementById("camera-form");
+      const formTitle = document.getElementById("form-title");
+      const cameraNameInput = document.getElementById("camera-name");
+      const cameraIpInput = document.getElementById("camera-ip");
+      const cameraLocationInput = document.getElementById("camera-location");
+      const cameraStatusSelect = document.getElementById("camera-status");
+      const saveCameraBtn = document.getElementById("save-camera-btn");
+      const cancelEditBtn = document.getElementById("cancel-edit-btn");
+      const managementList = document.getElementById("management-list");
 
       // Tab navigation
       document.querySelectorAll(".tab-item").forEach((tab) => {
@@ -174,6 +251,7 @@
           cameras = await response.json();
           renderCameraList();
           populateDetectionCameras();
+          renderManagementList();
           return true;
         } catch (error) {
           console.error("Error fetching cameras:", error);
@@ -595,6 +673,10 @@
         // Load detection results
         fetchDetectionResults();
 
+        // Camera management event listeners
+        saveCameraBtn.addEventListener("click", saveCamera);
+        cancelEditBtn.addEventListener("click", clearForm);
+
         // Refresh cameras button
         document
           .getElementById("refresh-cameras")
@@ -683,6 +765,151 @@
           updateActiveCount();
         } catch (error) {
           console.error("Error removing camera from stream:", error);
+        }
+      }
+
+      // Camera Management Functions
+      function renderManagementList() {
+        managementList.innerHTML = "";
+
+        Object.values(cameras).forEach((camera) => {
+          const managementItem = document.createElement("div");
+          managementItem.className = "management-item";
+
+          managementItem.innerHTML = `
+            <div class="management-item-info">
+              <h5>${camera.name}</h5>
+              <p>IP: ${camera.ip} | Vị trí: ${camera.location}</p>
+              <p>Trạng thái: <span class="camera-status ${
+                camera.status === "online" ? "status-online" : "status-offline"
+              }"></span> ${camera.status}</p>
+            </div>
+            <div class="management-item-actions">
+              <button class="btn-edit" onclick="editCamera('${
+                camera.id
+              }')">Sửa</button>
+              <button class="btn-delete" onclick="deleteCamera('${
+                camera.id
+              }')">Xóa</button>
+            </div>
+          `;
+
+          managementList.appendChild(managementItem);
+        });
+      }
+
+      function clearForm() {
+        cameraNameInput.value = "";
+        cameraIpInput.value = "";
+        cameraLocationInput.value = "";
+        cameraStatusSelect.value = "offline";
+        currentEditingCamera = null;
+        formTitle.textContent = "Thêm Camera Mới";
+        saveCameraBtn.textContent = "Lưu Camera";
+        cancelEditBtn.style.display = "none";
+      }
+
+      async function saveCamera() {
+        const name = cameraNameInput.value.trim();
+        const ip = cameraIpInput.value.trim();
+        const location = cameraLocationInput.value.trim();
+        const status = cameraStatusSelect.value;
+
+        if (!name || !ip || !location) {
+          alert("Vui lòng điền đầy đủ thông tin camera");
+          return;
+        }
+
+        try {
+          let response;
+          if (currentEditingCamera) {
+            // Update existing camera
+            response = await fetch(`/api/cameras/${currentEditingCamera}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ name, ip, location, status }),
+            });
+          } else {
+            // Add new camera
+            response = await fetch("/api/cameras", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ name, ip, location, status }),
+            });
+          }
+
+          const result = await response.json();
+
+          if (result.success) {
+            alert(
+              currentEditingCamera
+                ? "Camera đã được cập nhật!"
+                : "Camera mới đã được thêm!"
+            );
+            clearForm();
+            await fetchCameras();
+            renderManagementList();
+          } else {
+            alert("Lỗi: " + result.error);
+          }
+        } catch (error) {
+          console.error("Error saving camera:", error);
+          alert("Có lỗi xảy ra khi lưu camera");
+        }
+      }
+
+      function editCamera(cameraId) {
+        const camera = cameras[cameraId];
+        if (!camera) return;
+
+        currentEditingCamera = cameraId;
+        cameraNameInput.value = camera.name;
+        cameraIpInput.value = camera.ip;
+        cameraLocationInput.value = camera.location;
+        cameraStatusSelect.value = camera.status;
+
+        formTitle.textContent = "Sửa Camera";
+        saveCameraBtn.textContent = "Cập nhật Camera";
+        cancelEditBtn.style.display = "inline-block";
+      }
+
+      async function deleteCamera(cameraId) {
+        const camera = cameras[cameraId];
+        if (!camera) return;
+
+        if (!confirm(`Bạn có chắc muốn xóa camera "${camera.name}"?`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/cameras/${cameraId}`, {
+            method: "DELETE",
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            alert("Camera đã được xóa!");
+            await fetchCameras();
+            renderManagementList();
+
+            // Remove from active streams if it was streaming
+            if (activeStreams.has(cameraId)) {
+              activeStreams.delete(cameraId);
+              saveActiveStreams();
+              renderCameraGrid();
+              updateActiveCount();
+            }
+          } else {
+            alert("Lỗi: " + result.error);
+          }
+        } catch (error) {
+          console.error("Error deleting camera:", error);
+          alert("Có lỗi xảy ra khi xóa camera");
         }
       }
     </script>
