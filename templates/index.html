@@ -47,6 +47,7 @@
             </div>
             <div class="tab-item" data-tab="detection">Phát hiện khuôn mặt</div>
             <div class="tab-item" data-tab="manage">Quản lý Camera</div>
+            <div class="tab-item" data-tab="realcam">📷 Test Camera Thật</div>
           </div>
 
           <div class="tab-content active" id="cameras-tab">
@@ -257,6 +258,97 @@
               </div>
             </div>
           </div>
+
+          <div class="tab-content" id="realcam-tab">
+            <h3>📷 Test Camera Thật</h3>
+            <div class="real-camera-section">
+              <div class="camera-info-box">
+                <h4>Hướng dẫn sử dụng:</h4>
+                <ul>
+                  <li>🎥 Nhấn "Bật Camera" để mở webcam laptop</li>
+                  <li>👤 Nhấn "Test Phát hiện" để scan khuôn mặt</li>
+                  <li>📸 Ảnh có khuôn mặt sẽ được lưu tự động</li>
+                  <li>📊 Kết quả hiển thị trong tab "Kết quả phát hiện"</li>
+                </ul>
+                <div class="browser-support">
+                  <p>
+                    <strong>🌐 Trình duyệt hỗ trợ:</strong> Chrome 53+, Firefox
+                    36+, Safari 11+, Edge 12+
+                  </p>
+                  <button
+                    id="check-browser-btn"
+                    class="camera-btn secondary"
+                    style="font-size: 0.8rem; padding: 5px 10px"
+                  >
+                    ✅ Kiểm tra trình duyệt
+                  </button>
+                </div>
+              </div>
+
+              <div class="camera-controls">
+                <button id="start-camera-btn" class="camera-btn">
+                  🎥 Bật Camera
+                </button>
+                <button
+                  id="stop-camera-btn"
+                  class="camera-btn secondary"
+                  style="display: none"
+                >
+                  🛑 Tắt Camera
+                </button>
+                <button
+                  id="test-real-detection-btn"
+                  class="camera-btn test-detection"
+                  disabled
+                >
+                  🔍 Test Phát hiện
+                </button>
+                <button
+                  id="auto-detect-btn"
+                  class="camera-btn"
+                  disabled
+                  style="display: none"
+                >
+                  🤖 Tự động phát hiện
+                </button>
+              </div>
+
+              <div class="video-container">
+                <video
+                  id="webcam-video"
+                  autoplay
+                  muted
+                  style="display: none"
+                ></video>
+                <canvas id="webcam-canvas" style="display: none"></canvas>
+                <div id="camera-placeholder" class="camera-placeholder">
+                  <div class="placeholder-content">
+                    <span class="camera-icon">📷</span>
+                    <p>Nhấn "Bật Camera" để bắt đầu</p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="detection-stats"
+                id="detection-stats"
+                style="display: none"
+              >
+                <div class="stat-item">
+                  <span class="stat-label">Tests đã chạy:</span>
+                  <span class="stat-value" id="tests-count">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Khuôn mặt phát hiện:</span>
+                  <span class="stat-value" id="faces-count">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Tỷ lệ thành công:</span>
+                  <span class="stat-value" id="success-rate">0%</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="main-content">
@@ -305,6 +397,35 @@
       let autoDetectionProgress = 0;
       let currentDetectionTimer = null;
       let countdownInterval = null; // Add this to track countdown timer
+
+      // Real Camera Variables
+      let webcamStream = null;
+      let realCameraStats = {
+        testsRun: 0,
+        facesDetected: 0,
+        successRate: 0,
+      };
+
+      // Polyfill for older browsers
+      function initializeWebRTC() {
+        // Older browser compatibility
+        navigator.getUserMedia =
+          navigator.getUserMedia ||
+          navigator.webkitGetUserMedia ||
+          navigator.mozGetUserMedia ||
+          navigator.msGetUserMedia;
+
+        // Modern API fallback
+        if (!navigator.mediaDevices && navigator.getUserMedia) {
+          navigator.mediaDevices = {
+            getUserMedia: function (constraints) {
+              return new Promise(function (resolve, reject) {
+                navigator.getUserMedia(constraints, resolve, reject);
+              });
+            },
+          };
+        }
+      }
 
       // DOM Elements
       const cameraList = document.getElementById("camera-list");
@@ -358,11 +479,32 @@
       const cancelEditBtn = document.getElementById("cancel-edit-btn");
       const managementList = document.getElementById("management-list");
 
+      // Real Camera DOM Elements
+      const startCameraBtn = document.getElementById("start-camera-btn");
+      const stopCameraBtn = document.getElementById("stop-camera-btn");
+      const testRealDetectionBtn = document.getElementById(
+        "test-real-detection-btn"
+      );
+      const webcamVideo = document.getElementById("webcam-video");
+      const webcamCanvas = document.getElementById("webcam-canvas");
+      const cameraPlaceholder = document.getElementById("camera-placeholder");
+      const detectionStats = document.getElementById("detection-stats");
+      const testsCountEl = document.getElementById("tests-count");
+      const facesCountEl = document.getElementById("faces-count");
+      const successRateEl = document.getElementById("success-rate");
+
       // Tab navigation
       document.querySelectorAll(".tab-item").forEach((tab) => {
         tab.addEventListener("click", () => {
           const tabName = tab.getAttribute("data-tab");
           const tabContainer = tab.closest(".sidebar, .main-content");
+
+          console.log(
+            "Tab clicked:",
+            tabName,
+            "in container:",
+            tabContainer.className
+          );
 
           // Activate tab chỉ trong container hiện tại
           tabContainer
@@ -374,7 +516,11 @@
           tabContainer
             .querySelectorAll(".tab-content")
             .forEach((c) => c.classList.remove("active"));
-          tabContainer.querySelector(`#${tabName}-tab`).classList.add("active");
+          const targetTab = tabContainer.querySelector(`#${tabName}-tab`);
+          console.log("Target tab element:", targetTab);
+          if (targetTab) {
+            targetTab.classList.add("active");
+          }
         });
       });
 
@@ -990,7 +1136,14 @@
 
         detectionResults.forEach((result, index) => {
           console.log(`Rendering detection ${index}:`, result);
-          const camera = cameras[result.camera_id];
+          const camera = cameras[result.camera_id] ||
+            result.camera_info || {
+              name: "Camera Laptop",
+              location: "Webcam",
+              ip: "localhost",
+              id: result.camera_id,
+            };
+
           if (!camera) {
             console.warn("Camera not found for result:", result.camera_id);
             return;
@@ -1006,22 +1159,32 @@
           const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
 
           const isTestMode = result.test_mode ? true : false;
+          const isRealCamera = result.real_camera ? true : false;
 
           const detectionItem = document.createElement("div");
           detectionItem.className = `detection-item ${
             isTestMode ? "test-detection-item" : ""
-          }`;
+          } ${isRealCamera ? "real-camera-item" : ""}`;
 
           detectionItem.innerHTML = `
             <img src="${
               result.image_path
             }" class="detection-thumbnail" alt="Detection result">
             <div class="detection-info">
-              <h4>${camera.name} ${isTestMode ? "🧪 (TEST)" : ""}</h4>
+              <h4>${camera.name} ${isTestMode ? "🧪 (TEST)" : ""} ${
+            isRealCamera ? "📷 (REAL)" : ""
+          }</h4>
               <p>Vị trí: ${camera.location}</p>
               <p>Thời gian: ${formattedDate}</p>
               <p>IP: ${camera.ip}</p>
               ${isTestMode ? '<p class="test-badge">Chế độ test</p>' : ""}
+              ${
+                isRealCamera
+                  ? `<p class="real-badge">Camera thật - ${
+                      result.faces_detected || 1
+                    } khuôn mặt</p>`
+                  : ""
+              }
             </div>
           `;
 
@@ -1287,6 +1450,9 @@
 
       // Initialization
       document.addEventListener("DOMContentLoaded", async () => {
+        // Initialize WebRTC polyfill
+        initializeWebRTC();
+
         // Load cameras first
         await fetchCameras();
 
@@ -1310,6 +1476,14 @@
         // Auto detection event listeners
         startAutoDetectionBtn.addEventListener("click", startAutoDetection);
         stopAutoDetectionBtn.addEventListener("click", stopAutoDetection);
+
+        // Real Camera event listeners
+        startCameraBtn.addEventListener("click", startWebcam);
+        stopCameraBtn.addEventListener("click", stopWebcam);
+        testRealDetectionBtn.addEventListener("click", testRealFaceDetection);
+        document
+          .getElementById("check-browser-btn")
+          .addEventListener("click", checkBrowserSupport);
 
         // Initialize detection mode
         handleDetectionModeChange();
@@ -1623,6 +1797,228 @@
           console.error("Error testing face detection:", error);
           showToast("Có lỗi xảy ra khi test phát hiện khuôn mặt", "error");
         }
+      }
+
+      // Real Camera Functions
+      async function startWebcam() {
+        try {
+          showToast("Đang mở camera...", "info");
+
+          // Check if browser supports getUserMedia
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error(
+              "Trình duyệt không hỗ trợ WebRTC/Camera API. Vui lòng sử dụng Chrome, Firefox, hoặc Edge phiên bản mới."
+            );
+          }
+
+          // Check if we're in a secure context
+          if (!window.isSecureContext && location.protocol !== "http:") {
+            console.warn("Not in secure context, camera may not work");
+          }
+
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              facingMode: "user", // Use front camera
+            },
+            audio: false,
+          });
+
+          webcamStream = stream;
+          webcamVideo.srcObject = stream;
+
+          // Wait for video to load
+          await new Promise((resolve) => {
+            webcamVideo.onloadedmetadata = () => {
+              webcamVideo.play();
+              resolve();
+            };
+          });
+
+          // Show video, hide placeholder
+          cameraPlaceholder.style.display = "none";
+          webcamVideo.style.display = "block";
+
+          // Update buttons
+          startCameraBtn.style.display = "none";
+          stopCameraBtn.style.display = "inline-block";
+          testRealDetectionBtn.disabled = false;
+
+          // Show stats
+          detectionStats.style.display = "flex";
+          updateRealCameraStats();
+
+          showToast("Camera đã được bật thành công!", "success");
+        } catch (error) {
+          console.error("Error accessing webcam:", error);
+          let errorMessage = "Lỗi khi mở camera: " + error.message;
+
+          if (error.name === "NotAllowedError") {
+            errorMessage =
+              '❌ Quyền truy cập camera bị từ chối. Vui lòng:\n1. Click vào biểu tượng 🔒 bên trái thanh địa chỉ\n2. Chọn "Cho phép" Camera\n3. Làm mới trang và thử lại';
+          } else if (error.name === "NotFoundError") {
+            errorMessage =
+              "❌ Không tìm thấy camera. Vui lòng:\n1. Kiểm tra camera laptop có hoạt động không\n2. Đóng các ứng dụng khác đang sử dụng camera\n3. Thử lại";
+          } else if (error.name === "NotSupportedError") {
+            errorMessage =
+              "❌ Trình duyệt không hỗ trợ Camera API. Vui lòng sử dụng:\n• Chrome 53+\n• Firefox 36+\n• Safari 11+\n• Edge 12+";
+          } else if (error.message.includes("getUserMedia")) {
+            errorMessage =
+              "❌ Camera API không khả dụng. Hãy thử:\n1. Mở bằng HTTPS nếu có thể\n2. Sử dụng trình duyệt mới hơn\n3. Kiểm tra quyền camera trong settings";
+          }
+
+          showToast(errorMessage, "error");
+        }
+      }
+
+      function stopWebcam() {
+        if (webcamStream) {
+          webcamStream.getTracks().forEach((track) => track.stop());
+          webcamStream = null;
+        }
+
+        // Hide video, show placeholder
+        webcamVideo.style.display = "none";
+        cameraPlaceholder.style.display = "flex";
+
+        // Update buttons
+        startCameraBtn.style.display = "inline-block";
+        stopCameraBtn.style.display = "none";
+        testRealDetectionBtn.disabled = true;
+
+        showToast("Camera đã được tắt", "info");
+      }
+
+      async function testRealFaceDetection() {
+        if (!webcamStream) {
+          showToast("Vui lòng bật camera trước", "warning");
+          return;
+        }
+
+        try {
+          showToast("Đang phát hiện khuôn mặt...", "info");
+
+          // Capture current frame from video
+          const canvas = webcamCanvas;
+          const context = canvas.getContext("2d");
+          canvas.width = webcamVideo.videoWidth;
+          canvas.height = webcamVideo.videoHeight;
+
+          // Draw current video frame to canvas
+          context.drawImage(webcamVideo, 0, 0);
+
+          // Convert canvas to base64
+          const imageData = canvas.toDataURL("image/jpeg", 0.8);
+
+          // Send to backend for face detection
+          const response = await fetch("/api/test-real-camera", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ image: imageData }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            realCameraStats.testsRun++;
+
+            if (result.faces_detected > 0) {
+              realCameraStats.facesDetected += result.faces_detected;
+              showToast(`✅ ${result.message}`, "success");
+
+              // Auto switch to detection results tab
+              const detectionsTab = document.querySelector(
+                '.main-content .tab-item[data-tab="detections"]'
+              );
+              if (detectionsTab) {
+                detectionsTab.click();
+              }
+
+              // Refresh detection results
+              await fetchDetectionResults();
+            } else {
+              showToast("ℹ️ " + result.message, "info");
+            }
+
+            updateRealCameraStats();
+          } else {
+            showToast("❌ Lỗi: " + result.error, "error");
+          }
+        } catch (error) {
+          console.error("Error testing real face detection:", error);
+          showToast("Có lỗi xảy ra khi phát hiện khuôn mặt", "error");
+        }
+      }
+
+      function updateRealCameraStats() {
+        testsCountEl.textContent = realCameraStats.testsRun;
+        facesCountEl.textContent = realCameraStats.facesDetected;
+
+        if (realCameraStats.testsRun > 0) {
+          const successRate = (
+            (realCameraStats.facesDetected / realCameraStats.testsRun) *
+            100
+          ).toFixed(1);
+          successRateEl.textContent = successRate + "%";
+        } else {
+          successRateEl.textContent = "0%";
+        }
+      }
+
+      function checkBrowserSupport() {
+        let supportInfo = "🔍 Thông tin trình duyệt:\n\n";
+
+        // Browser info
+        supportInfo += `📱 User Agent: ${navigator.userAgent}\n\n`;
+
+        // WebRTC support
+        const hasGetUserMedia = !!(
+          navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+        );
+        const hasLegacyGetUserMedia = !!(
+          navigator.getUserMedia ||
+          navigator.webkitGetUserMedia ||
+          navigator.mozGetUserMedia
+        );
+
+        supportInfo += `📹 Camera API:\n`;
+        supportInfo += `  • Modern API (mediaDevices): ${
+          hasGetUserMedia ? "✅ Có" : "❌ Không"
+        }\n`;
+        supportInfo += `  • Legacy API: ${
+          hasLegacyGetUserMedia ? "✅ Có" : "❌ Không"
+        }\n\n`;
+
+        // HTTPS check
+        const isSecure =
+          window.isSecureContext ||
+          location.protocol === "https:" ||
+          location.hostname === "localhost";
+        supportInfo += `🔐 Secure Context: ${
+          isSecure ? "✅ Có" : "⚠️ Không (cần HTTPS)"
+        }\n\n`;
+
+        // Overall compatibility
+        const isCompatible =
+          (hasGetUserMedia || hasLegacyGetUserMedia) && isSecure;
+        supportInfo += `🎯 Tổng kết: ${
+          isCompatible ? "✅ Tương thích" : "❌ Không tương thích"
+        }\n\n`;
+
+        if (!isCompatible) {
+          supportInfo += `💡 Khuyến nghị:\n`;
+          if (!hasGetUserMedia && !hasLegacyGetUserMedia) {
+            supportInfo += `  • Cập nhật trình duyệt lên phiên bản mới\n`;
+          }
+          if (!isSecure) {
+            supportInfo += `  • Sử dụng HTTPS hoặc localhost\n`;
+          }
+        }
+
+        showToast(supportInfo, isCompatible ? "success" : "warning");
       }
     </script>
   </body>

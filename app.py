@@ -11,6 +11,9 @@ from PIL import Image
 import base64
 import io
 
+# Add imports for real camera
+import uuid
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'streamcamerasecurity'
 socketio = SocketIO(app)
@@ -319,6 +322,77 @@ def run_face_detection(schedule_id, camera_ids, duration):
     
     if schedule_id in face_detection_schedule:
         face_detection_schedule[schedule_id]["status"] = "completed"
+
+@app.route('/api/test-real-camera', methods=['POST'])
+def test_real_camera():
+    """API để test phát hiện khuôn mặt từ camera thật"""
+    try:
+        # Get image data from request
+        data = request.json
+        if not data or 'image' not in data:
+            return jsonify({"error": "Không có dữ liệu ảnh"}), 400
+        
+        # Decode base64 image
+        image_data = data['image'].split(',')[1]  # Remove data:image/jpeg;base64,
+        image_bytes = base64.b64decode(image_data)
+        
+        # Convert to OpenCV format
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            return jsonify({"error": "Không thể đọc ảnh"}), 400
+        
+        # Convert to grayscale for face detection
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        # Draw rectangles around faces
+        for (x, y, w, h) in faces:
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        
+        # Save image if faces detected
+        if len(faces) > 0:
+            timestamp = int(time.time())
+            filename = f"real_camera_{timestamp}_faces_{len(faces)}.jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            cv2.imwrite(filepath, frame)
+            
+            # Send WebSocket notification
+            detection_data = {
+                "camera_id": "real_camera",
+                "timestamp": timestamp,
+                "image_path": f"/static/detections/{filename}",
+                "camera_info": {
+                    "name": "Camera Laptop",
+                    "ip": "localhost",
+                    "location": "Webcam",
+                    "id": "real_camera"
+                },
+                "test_mode": True,
+                "real_camera": True,
+                "faces_detected": len(faces)
+            }
+            socketio.emit('face_detected', detection_data)
+            
+            return jsonify({
+                "success": True,
+                "faces_detected": len(faces),
+                "message": f"Phát hiện {len(faces)} khuôn mặt từ camera thật!",
+                "detection": detection_data
+            })
+        else:
+            return jsonify({
+                "success": True,
+                "faces_detected": 0,
+                "message": "Không phát hiện khuôn mặt nào"
+            })
+            
+    except Exception as e:
+        print(f"Error in test_real_camera: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Khởi tạo dữ liệu
 load_cameras()

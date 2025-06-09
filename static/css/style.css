@@ -246,6 +246,7 @@ button.danger:hover {
   display: flex;
   margin-bottom: 20px;
   border-bottom: 1px solid #ddd;
+  flex-wrap: wrap;
 }
 
 .tab-item {
@@ -253,15 +254,21 @@ button.danger:hover {
   cursor: pointer;
   border-bottom: 3px solid transparent;
   transition: all 0.3s ease;
+  background-color: #f8f9fa;
+  margin-right: 2px;
+  border-radius: 4px 4px 0 0;
+  font-size: 0.9rem;
+  white-space: nowrap;
 }
 
 .tab-item:hover {
-  background-color: #f8f9fa;
+  background-color: #e9ecef;
 }
 
 .tab-item.active {
   border-bottom-color: #2c3e50;
   font-weight: bold;
+  background-color: white;
 }
 
 .tab-content {
@@ -321,6 +328,31 @@ button.danger:hover {
   font-weight: bold;
   font-size: 0.8rem;
   background-color: #fed7aa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  margin-top: 5px;
+}
+
+/* Real Camera Detection Items */
+.real-camera-item {
+  border-left: 4px solid #28a745;
+  background-color: #f8fff9;
+}
+
+.real-camera-item .detection-thumbnail {
+  border-color: #28a745;
+}
+
+.real-camera-item h4 {
+  color: #28a745;
+}
+
+.real-badge {
+  color: #28a745;
+  font-weight: bold;
+  font-size: 0.8rem;
+  background-color: #d4edda;
   padding: 2px 6px;
   border-radius: 4px;
   display: inline-block;
@@ -491,6 +523,11 @@ button.danger:hover {
   opacity: 0;
   transform: translateX(100%);
   transition: all 0.3s ease;
+  max-width: 400px;
+  white-space: pre-line;
+  font-family: monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .toast.show {
@@ -728,4 +765,135 @@ button.danger:hover {
 
 .test-detection:hover {
   background-color: #e8590c;
+}
+
+/* Real Camera Testing Styles */
+.real-camera-section {
+  padding: 20px;
+}
+
+.camera-info-box {
+  background-color: #e8f4f8;
+  border: 1px solid #17a2b8;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+
+.camera-info-box h4 {
+  margin: 0 0 10px 0;
+  color: #17a2b8;
+}
+
+.camera-info-box ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.camera-info-box li {
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.camera-controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.camera-btn {
+  padding: 10px 15px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.camera-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.video-container {
+  width: 100%;
+  max-width: 640px;
+  height: 480px;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  background-color: #000;
+  margin-bottom: 20px;
+}
+
+#webcam-video,
+#webcam-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #666;
+}
+
+.camera-icon {
+  font-size: 4rem;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.detection-stats {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.browser-support {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #f0f8ff;
+  border-radius: 4px;
+  border: 1px solid #17a2b8;
+}
+
+.browser-support p {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: #333;
 }
