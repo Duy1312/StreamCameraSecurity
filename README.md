@@ -1,108 +1,207 @@
-# Hệ thống Camera An ninh
+# Hệ thống Camera An ninh - StreamCameraSecurity
 
-Hệ thống quản lý và stream camera an ninh với khả năng phát hiện khuôn mặt người sử dụng OpenCV.
+Hệ thống giám sát và phát hiện khuôn mặt cho hệ thống camera an ninh với giao diện web hiện đại.
 
-## Tính năng
+## Tính năng chính
 
-- Stream tối đa 400 camera
-- Hiển thị 20 camera cùng lúc
-- Lên lịch phát hiện khuôn mặt cho 20 camera trong 1 giờ
-- Lưu ảnh khi phát hiện khuôn mặt
-- Hiển thị thông tin chi tiết về camera: IP, vị trí
-- Thông báo khi phát hiện khuôn mặt
-- Giao diện người dùng thân thiện
+- ✅ Quản lý tối đa 400 camera
+- ✅ Stream đồng thời tối đa 20 camera
+- ✅ Phát hiện khuôn mặt tự động
+- ✅ Lên lịch phát hiện cho nhiều camera
+- ✅ Test camera thật qua webcam
+- ✅ Giao diện web responsive
+- ✅ Thông báo real-time qua WebSocket
+- ✅ Lưu trữ và quản lý kết quả phát hiện
 
-## Yêu cầu hệ thống
+## Cài đặt và Chạy
 
-- Python 3.6+
-- OpenCV
-- Flask
-- Các thư viện Python khác (xem file requirements.txt)
+### Yêu cầu hệ thống
 
-## Cài đặt
+- Python 3.8+
+- Camera (tùy chọn cho tính năng test camera thật)
 
-1. Clone repository:
+### 1. Cài đặt dependencies
 
-```
-git clone [url-repository]
-cd StreamCameraSecurity
-```
-
-2. Cài đặt các thư viện phụ thuộc:
-
-```
+```bash
 pip install -r requirements.txt
 ```
 
-3. Tạo thư mục lưu trữ ảnh:
+### 2. Cấu hình bảo mật (QUAN TRỌNG)
 
+```bash
+# Sao chép file cấu hình mẫu
+cp example.env .env
+
+# Chỉnh sửa file .env
+# Thay đổi SECRET_KEY thành một chuỗi bí mật phức tạp
+# Điều chỉnh các cài đặt khác theo nhu cầu
 ```
-mkdir -p static/images
-mkdir -p static/detections
-```
 
-4. Thêm ảnh mẫu cho camera:
-   Thêm một ảnh có tên `camera-placeholder.jpg` vào thư mục `static/images/`
+**Cài đặt bảo mật quan trọng:**
 
-## Chạy ứng dụng
+- `SECRET_KEY`: Thay đổi thành chuỗi bí mật phức tạp (tối thiểu 32 ký tự)
+- `FLASK_ENV`: Đặt `production` cho môi trường sản xuất
+- `MAX_FILE_SIZE`: Giới hạn kích thước file upload (mặc định 10MB)
 
-```
+### 3. Chạy ứng dụng
+
+```bash
 python app.py
 ```
 
-Sau đó mở trình duyệt và truy cập: http://localhost:5000
+Ứng dụng sẽ chạy tại: http://localhost:5000
 
-## Cấu hình
+## Cấu trúc dự án
 
-### Thêm camera thực
-
-Để kết nối với camera IP thực, bạn cần sửa hàm `simulate_camera_frame` trong file `app.py`:
-
-```python
-def get_camera_frame(camera_id):
-    camera_info = cameras.get(camera_id, {})
-    ip = camera_info.get('ip', '')
-
-    # Kết nối với camera IP (ví dụ với OpenCV)
-    cap = cv2.VideoCapture(f"rtsp://{ip}/stream")
-    ret, frame = cap.read()
-    cap.release()
-
-    if not ret:
-        # Trả về frame mặc định nếu không kết nối được
-        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(frame, "Không thể kết nối", (20, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-    # Thêm thông tin camera
-    cv2.putText(frame, camera_info.get("name", ""), (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-    cv2.putText(frame, f"IP: {ip}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.putText(frame, f"Location: {camera_info.get('location', '')}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-    return frame
+```
+StreamCameraSecurity/
+├── app.py                 # Ứng dụng Flask chính
+├── config.py             # Cấu hình và validation
+├── requirements.txt      # Dependencies
+├── example.env          # File cấu hình mẫu
+├── .env                 # File cấu hình thực (tạo từ example.env)
+├── cameras.json         # Dữ liệu camera (tự động tạo)
+├── templates/
+│   └── index.html       # Giao diện web
+├── static/
+│   ├── css/            # Stylesheets
+│   ├── js/             # JavaScript
+│   ├── fonts/          # Fonts
+│   └── detections/     # Ảnh phát hiện khuôn mặt
+└── README.md
 ```
 
-Sau đó thay `simulate_camera_frame` bằng `get_camera_frame` trong hàm `run_face_detection`.
+## Sử dụng
 
-### Cấu hình camera
+### 1. Quản lý Camera
 
-Thông tin camera được lưu trong file `cameras.json`. Bạn có thể chỉnh sửa file này để thêm camera thực của mình.
+- **Xem danh sách**: Tất cả camera được hiển thị với trạng thái
+- **Thêm camera**: Nhập tên, IP và vị trí
+- **Sửa camera**: Cập nhật thông tin camera
+- **Xóa camera**: Xóa camera khỏi hệ thống
 
-## Dành cho nhà phát triển
+### 2. Stream Camera
 
-### Cấu trúc dự án
+- Chọn camera từ danh sách
+- Click "Bắt đầu Stream"
+- Tối đa 20 camera cùng lúc
+- Click "Dừng Stream" để ngừng
 
-- `app.py`: Mã nguồn chính của ứng dụng Flask
-- `templates/`: Chứa các template HTML
-- `static/`: Chứa CSS, JavaScript, và tài nguyên tĩnh
-- `static/detections/`: Nơi lưu trữ ảnh khi phát hiện khuôn mặt
-- `cameras.json`: Cấu hình camera
+### 3. Phát hiện Khuôn mặt
 
-### Mở rộng
+#### Chế độ thủ công
 
-1. **Thêm xác thực người dùng**: Bảo mật hệ thống với đăng nhập và phân quyền
-2. **Thêm chức năng ghi lại video**: Lưu lại video khi phát hiện khuôn mặt
-3. **Tích hợp nhận dạng khuôn mặt**: Nhận dạng danh tính của người được phát hiện
+- Sử dụng camera đang stream
+- Đặt thời gian phát hiện (1-120 phút)
+- Bắt đầu phát hiện
+
+#### Chế độ tự động
+
+- Tự động check 20 camera/chu kỳ
+- Tiến trình từ camera 1 đến 400
+- Đặt thời gian cho mỗi chu kỳ
+
+### 4. Test Camera Thật
+
+- Truy cập tab "📷 Test Camera Thật"
+- Cho phép trình duyệt truy cập camera
+- Click "Chụp và phát hiện khuôn mặt"
+
+## API Endpoints
+
+### Camera Management
+
+- `GET /api/cameras` - Lấy danh sách camera
+- `POST /api/cameras` - Thêm camera mới
+- `PUT /api/cameras/<id>` - Cập nhật camera
+- `DELETE /api/cameras/<id>` - Xóa camera
+
+### Streaming
+
+- `GET /api/active-streams` - Lấy danh sách stream đang hoạt động
+- `POST /api/start-stream` - Bắt đầu stream camera
+- `POST /api/stop-stream` - Dừng stream camera
+
+### Face Detection
+
+- `POST /api/schedule-detection` - Lên lịch phát hiện
+- `GET /api/detection-results` - Lấy kết quả phát hiện
+- `POST /api/test-face-detection` - Test phát hiện (camera giả)
+- `POST /api/test-real-camera` - Test camera thật
+
+## Tính năng Bảo mật
+
+- ✅ Validation đầu vào đầy đủ
+- ✅ Sanitization dữ liệu
+- ✅ Rate limiting cho upload
+- ✅ Error handling an toàn
+- ✅ Logging hệ thống
+- ✅ Cấu hình môi trường riêng biệt
+- ✅ Kiểm tra định dạng IP
+- ✅ Giới hạn kích thước file
+
+## Monitoring và Logs
+
+Ứng dụng ghi log các hoạt động quan trọng:
+
+- Khởi tạo hệ thống
+- Thêm/sửa/xóa camera
+- Bắt đầu/dừng stream
+- Phát hiện khuôn mặt
+- Lỗi hệ thống
+
+## Môi trường Production
+
+Để triển khai production:
+
+1. **Cấu hình bảo mật**:
+
+```bash
+# Trong file .env
+FLASK_ENV=production
+FLASK_DEBUG=False
+SECRET_KEY=very_long_and_complex_secret_key_here
+```
+
+2. **Sử dụng WSGI server**:
+
+```bash
+pip install gunicorn
+gunicorn -w 4 -b 0.0.0.0:5000 "app:app"
+```
+
+3. **Reverse proxy** (Nginx recommended)
+4. **SSL/HTTPS** cho bảo mật
+5. **Backup định kỳ** cho cameras.json
+
+## Troubleshooting
+
+### Lỗi thường gặp
+
+1. **Camera không stream được**
+
+   - Kiểm tra IP camera có đúng không
+   - Đảm bảo không vượt quá 20 camera đồng thời
+
+2. **Không phát hiện được khuôn mặt**
+
+   - Kiểm tra camera có hoạt động không
+   - Đảm bảo có đủ ánh sáng
+   - Thử tính năng test trước
+
+3. **Lỗi kết nối**
+
+   - Kiểm tra port 5000 có bị chặn không
+   - Đảm bảo firewall cho phép kết nối
+
+4. **Lỗi cấu hình**
+   - Kiểm tra file .env có tồn tại không
+   - Đảm bảo SECRET_KEY đã được đặt
+
+## Đóng góp
+
+Chào mừng mọi đóng góp để cải thiện dự án!
 
 ## Giấy phép
 
-[MIT License](LICENSE)
+Dự án này được phát hành dưới giấy phép MIT.
