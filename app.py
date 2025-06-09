@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask import Flask, render_template, jsonify, request, redirect, url_for, g
 from flask_socketio import SocketIO
 from flask_migrate import Migrate
 from flask_limiter import Limiter
@@ -26,6 +26,15 @@ from services import (
     async_face_detection_service, AsyncFaceDetectionService
 )
 
+# Import logging và middleware
+from logger_config import setup_logging, request_logger, security_logger, performance_logger
+from middleware import (
+    RequestLoggingMiddleware, CompressionMiddleware, RateLimitMiddleware,
+    CacheControlMiddleware, SecurityHeadersMiddleware,
+    require_json, validate_pagination, log_api_call,
+    create_paginated_response, create_api_response
+)
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +44,9 @@ app = Flask(__name__)
 # Load configuration
 config_name = os.environ.get('FLASK_CONFIG', 'default')
 app.config.from_object(config[config_name])
+
+# Setup comprehensive logging system
+logger = setup_logging(app)
 
 # Initialize extensions
 db.init_app(app)
@@ -48,6 +60,13 @@ limiter = Limiter(
     storage_uri=app.config['RATELIMIT_STORAGE_URL']
 )
 limiter.init_app(app)
+
+# Initialize middleware
+request_logging = RequestLoggingMiddleware(app)
+compression = CompressionMiddleware(app, min_size=1024)
+rate_limit_middleware = RateLimitMiddleware(app)
+cache_control = CacheControlMiddleware(app)
+security_headers = SecurityHeadersMiddleware(app)
 
 # Thư mục lưu trữ ảnh khi phát hiện khuôn mặt
 UPLOAD_FOLDER = app.config['DETECTION_FOLDER']
@@ -171,77 +190,120 @@ def index():
 
 @app.route('/api/cameras')
 @limiter.limit("200/minute")
+@log_api_call
 def get_cameras():
-    """Get all cameras with caching"""
+    """Get all cameras with caching và enhanced logging"""
     try:
+        start_time = time.time()
         cameras_dict = CameraService.get_all_cameras()
-        return jsonify(cameras_dict)
+        duration = time.time() - start_time
+        
+        # Log performance
+        if duration > 0.5:
+            performance_logger.log_slow_query(
+                "SELECT cameras", duration, {"table": "cameras"}
+            )
+        
+        logger.info(f"Retrieved {len(cameras_dict)} cameras in {duration:.3f}s")
+        return create_api_response(cameras_dict, "Cameras retrieved successfully")
+        
     except Exception as e:
-        logger.error(f"Lỗi khi lấy danh sách camera: {e}")
-        return jsonify({"error": "Lỗi hệ thống khi lấy danh sách camera"}), 500
+        logger.error(f"Error retrieving cameras: {e}", exc_info=True)
+        return create_api_response(
+            status="error", 
+            message="Lỗi hệ thống khi lấy danh sách camera",
+            code=500
+        )
 
 @app.route('/api/active-streams')
 @limiter.limit("100/minute")
+@log_api_call
 def get_active_streams():
-    """Get active streams with caching"""
+    """Get active streams with caching và enhanced logging"""
     try:
         active_streams_list = StreamService.get_active_streams()
-        return jsonify(active_streams_list)
+        logger.debug(f"Retrieved {len(active_streams_list)} active streams")
+        return create_api_response(active_streams_list, "Active streams retrieved")
+        
     except Exception as e:
-        logger.error(f"Lỗi khi lấy danh sách stream: {e}")
-        return jsonify({"error": "Lỗi hệ thống khi lấy danh sách stream"}), 500
+        logger.error(f"Error retrieving active streams: {e}", exc_info=True)
+        return create_api_response(
+            status="error",
+            message="Lỗi hệ thống khi lấy danh sách stream",
+            code=500
+        )
 
 @app.route('/api/start-stream', methods=['POST'])
 @limiter.limit("30/minute")
+@require_json
+@log_api_call
 def start_stream():
-    """Start camera stream"""
+    """Start camera stream với enhanced validation và logging"""
     try:
         data = request.get_json()
         is_valid, error = validate_request_data(data, ['camera_id'])
         if not is_valid:
-            return jsonify({"error": error}), 400
+            security_logger.log_validation_error(request.remote_addr, request.endpoint, error)
+            return create_api_response(status="error", message=error, code=400)
         
         camera_id = sanitize_string(data['camera_id'])
         is_valid, error = validate_camera_id(camera_id)
         if not is_valid:
-            return jsonify({"error": error}), 400
+            security_logger.log_validation_error(request.remote_addr, request.endpoint, error)
+            return create_api_response(status="error", message=error, code=400)
         
         success, message = StreamService.start_camera_stream(camera_id)
         
         if success:
-            return jsonify({"success": True, "message": message})
+            logger.info(f"Stream started successfully for camera {camera_id}")
+            return create_api_response({"camera_id": camera_id}, message)
         else:
-            return jsonify({"error": message}), 400
+            logger.warning(f"Failed to start stream for camera {camera_id}: {message}")
+            return create_api_response(status="error", message=message, code=400)
     
     except Exception as e:
-        logger.error(f"Lỗi khi bắt đầu stream: {e}")
-        return jsonify({"error": "Lỗi hệ thống khi bắt đầu stream"}), 500
+        logger.error(f"Error starting stream: {e}", exc_info=True)
+        return create_api_response(
+            status="error",
+            message="Lỗi hệ thống khi bắt đầu stream",
+            code=500
+        )
 
 @app.route('/api/stop-stream', methods=['POST'])
 @limiter.limit("30/minute")
+@require_json
+@log_api_call
 def stop_stream():
-    """Stop camera stream"""
+    """Stop camera stream với enhanced validation và logging"""
     try:
         data = request.get_json()
         is_valid, error = validate_request_data(data, ['camera_id'])
         if not is_valid:
-            return jsonify({"error": error}), 400
+            security_logger.log_validation_error(request.remote_addr, request.endpoint, error)
+            return create_api_response(status="error", message=error, code=400)
         
         camera_id = sanitize_string(data['camera_id'])
         is_valid, error = validate_camera_id(camera_id)
         if not is_valid:
-            return jsonify({"error": error}), 400
+            security_logger.log_validation_error(request.remote_addr, request.endpoint, error)
+            return create_api_response(status="error", message=error, code=400)
         
         success, message = StreamService.stop_camera_stream(camera_id)
         
         if success:
-            return jsonify({"success": True, "message": message})
+            logger.info(f"Stream stopped successfully for camera {camera_id}")
+            return create_api_response({"camera_id": camera_id}, message)
         else:
-            return jsonify({"error": message}), 400
+            logger.warning(f"Failed to stop stream for camera {camera_id}: {message}")
+            return create_api_response(status="error", message=message, code=400)
     
     except Exception as e:
-        logger.error(f"Lỗi khi dừng stream: {e}")
-        return jsonify({"error": "Lỗi hệ thống khi dừng stream"}), 500
+        logger.error(f"Error stopping stream: {e}", exc_info=True)
+        return create_api_response(
+            status="error",
+            message="Lỗi hệ thống khi dừng stream",
+            code=500
+        )
 
 @app.route('/api/schedule-detection', methods=['POST'])
 @limiter.limit("10/minute")
@@ -303,30 +365,37 @@ def schedule_detection():
 
 @app.route('/api/detection-results')
 @limiter.limit("100/minute")
-def get_detection_results():
-    """Get detection results with pagination"""
+@validate_pagination
+@log_api_call
+def get_detection_results(page=1, per_page=20):
+    """Get detection results với enhanced pagination và logging"""
     try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', app.config['PAGINATION_PER_PAGE'], type=int)
-        
-        # Limit per_page to prevent abuse
-        per_page = min(per_page, 100)
-        
+        start_time = time.time()
         results, total_count = DetectionService.get_detection_results(page, per_page)
+        duration = time.time() - start_time
         
-        return jsonify({
-            "results": results,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": total_count,
-                "pages": (total_count + per_page - 1) // per_page
-            }
-        })
-    
+        # Log performance
+        if duration > 0.5:
+            performance_logger.log_slow_query(
+                "SELECT detections with pagination", duration, 
+                {"page": page, "per_page": per_page}
+            )
+        
+        # Create paginated response
+        response_data = create_paginated_response(
+            results, page, per_page, total_count, "/api/detection-results"
+        )
+        
+        logger.info(f"Retrieved {len(results)} detection results (page {page}) in {duration:.3f}s")
+        return create_api_response(response_data, "Detection results retrieved")
+        
     except Exception as e:
-        logger.error(f"Lỗi khi lấy kết quả phát hiện: {e}")
-        return jsonify({"error": "Lỗi hệ thống khi lấy kết quả phát hiện"}), 500
+        logger.error(f"Error retrieving detection results: {e}", exc_info=True)
+        return create_api_response(
+            status="error",
+            message="Lỗi hệ thống khi lấy kết quả phát hiện",
+            code=500
+        )
 
 @app.route('/api/cameras', methods=['POST'])
 @limiter.limit("10/minute")
@@ -607,26 +676,193 @@ def simulate_camera_frame_with_face(camera_id):
     
     return frame
 
-# Error handlers
+# Health check và monitoring endpoints
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint cho monitoring"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "version": "2.0.0",
+            "uptime": time.time() - app.start_time if hasattr(app, 'start_time') else 0,
+            "components": {}
+        }
+        
+        # Check database
+        try:
+            from sqlalchemy import text
+            db.session.execute(text('SELECT 1'))
+            health_status["components"]["database"] = "healthy"
+        except Exception as e:
+            health_status["components"]["database"] = f"unhealthy: {str(e)}"
+            health_status["status"] = "degraded"
+        
+        # Check Redis cache
+        try:
+            cache_manager.redis_client.ping()
+            health_status["components"]["redis"] = "healthy"
+        except Exception as e:
+            health_status["components"]["redis"] = f"unavailable: {str(e)}"
+        
+        # Check active streams
+        try:
+            active_streams = StreamService.get_active_streams(use_cache=False)
+            health_status["components"]["streams"] = {
+                "status": "healthy",
+                "active_count": len(active_streams)
+            }
+        except Exception as e:
+            health_status["components"]["streams"] = f"unhealthy: {str(e)}"
+        
+        status_code = 200 if health_status["status"] == "healthy" else 503
+        return jsonify(health_status), status_code
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 503
+
+@app.route('/api/metrics')
+@limiter.limit("10/minute")
+def get_metrics():
+    """API metrics endpoint cho monitoring tools"""
+    try:
+        metrics = {
+            "timestamp": time.time(),
+            "application": {
+                "name": "StreamCameraSecurity",
+                "version": "2.0.0",
+                "uptime": time.time() - app.start_time if hasattr(app, 'start_time') else 0
+            },
+            "database": {},
+            "cache": {},
+            "streams": {},
+            "detection": {}
+        }
+        
+        # Database metrics
+        try:
+            cameras_count = Camera.query.count()
+            detections_count = Detection.query.count()
+            sessions_count = StreamSession.query.count()
+            
+            metrics["database"] = {
+                "cameras_total": cameras_count,
+                "detections_total": detections_count,
+                "stream_sessions_total": sessions_count,
+                "status": "connected"
+            }
+        except Exception as e:
+            metrics["database"] = {"status": "error", "error": str(e)}
+        
+        # Cache metrics
+        try:
+            if cache_manager.is_available:
+                # Get some cache stats (simplified)
+                metrics["cache"] = {
+                    "status": "available",
+                    "type": "redis"
+                }
+            else:
+                metrics["cache"] = {"status": "unavailable"}
+        except Exception as e:
+            metrics["cache"] = {"status": "error", "error": str(e)}
+        
+        # Stream metrics
+        try:
+            active_streams = StreamService.get_active_streams(use_cache=False)
+            metrics["streams"] = {
+                "active_count": len(active_streams),
+                "active_streams": active_streams,
+                "max_concurrent": app.config['MAX_CAMERAS_STREAM']
+            }
+        except Exception as e:
+            metrics["streams"] = {"status": "error", "error": str(e)}
+        
+        # Detection metrics (last 24h)
+        try:
+            from datetime import timedelta
+            yesterday = datetime.utcnow() - timedelta(days=1)
+            recent_detections = Detection.query.filter(
+                Detection.created_at >= yesterday
+            ).count()
+            
+            metrics["detection"] = {
+                "recent_24h": recent_detections,
+                "max_concurrent": app.config['MAX_CAMERAS_DETECTION']
+            }
+        except Exception as e:
+            metrics["detection"] = {"status": "error", "error": str(e)}
+        
+        return jsonify(metrics)
+        
+    except Exception as e:
+        logger.error(f"Error retrieving metrics: {e}", exc_info=True)
+        return create_api_response(
+            status="error",
+            message="Lỗi khi lấy metrics",
+            code=500
+        )
+
+# Error handlers với enhanced logging
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({"error": "Endpoint không tồn tại"}), 404
+    security_logger.logger.warning(
+        "404 Not Found",
+        extra={
+            "url": request.url,
+            "method": request.method,
+            "remote_addr": request.remote_addr,
+            "user_agent": request.headers.get('User-Agent')
+        }
+    )
+    return create_api_response(
+        status="error",
+        message="Endpoint không tồn tại",
+        code=404
+    )
 
 @app.errorhandler(405)
 def method_not_allowed(error):
-    return jsonify({"error": "Phương thức HTTP không được phép"}), 405
+    security_logger.logger.warning(
+        "405 Method Not Allowed",
+        extra={
+            "url": request.url,
+            "method": request.method,
+            "remote_addr": request.remote_addr
+        }
+    )
+    return create_api_response(
+        status="error",
+        message="Phương thức HTTP không được phép",
+        code=405
+    )
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"Lỗi hệ thống: {error}")
-    return jsonify({"error": "Lỗi hệ thống nội bộ"}), 500
+    logger.error(f"Internal server error: {error}", exc_info=True)
+    return create_api_response(
+        status="error",
+        message="Lỗi hệ thống nội bộ",
+        code=500
+    )
 
-# Khởi tạo dữ liệu
+# Khởi tạo dữ liệu và start time tracking
+app.start_time = time.time()
+
 try:
     init_database()
-    logger.info("Ứng dụng khởi tạo thành công")
+    logger.info("✅ Ứng dụng khởi tạo thành công")
+    logger.info(f"📊 Logging system: {len(logger.handlers)} handlers configured")
+    logger.info(f"🗄️  Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
+    logger.info(f"🔄 Cache: {'Redis available' if cache_manager.is_available else 'Redis unavailable'}")
+    logger.info(f"📈 Middleware: Request logging, compression, rate limiting enabled")
 except Exception as e:
-    logger.error(f"Lỗi khởi tạo ứng dụng: {e}")
+    logger.error(f"❌ Lỗi khởi tạo ứng dụng: {e}", exc_info=True)
 
 if __name__ == '__main__':
     try:
