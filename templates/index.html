@@ -64,23 +64,112 @@
 
           <div class="tab-content" id="detection-tab">
             <h3>Lên lịch phát hiện khuôn mặt</h3>
+
+            <!-- Mode selection -->
             <div class="form-group">
-              <label for="detection-cameras">Chọn camera (tối đa 20)</label>
-              <select id="detection-cameras" multiple size="10">
-                <!-- Camera options will be populated here -->
-              </select>
+              <label>Chế độ phát hiện</label>
+              <div class="detection-modes">
+                <label class="mode-option">
+                  <input
+                    type="radio"
+                    name="detection-mode"
+                    value="manual"
+                    checked
+                  />
+                  <span>Thủ công - Chọn camera cụ thể</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="detection-mode" value="auto" />
+                  <span>Tự động - Check 20 camera/60p đến hết 400 camera</span>
+                </label>
+              </div>
             </div>
-            <div class="form-group">
-              <label for="detection-duration">Thời gian (phút)</label>
-              <input
-                type="number"
-                id="detection-duration"
-                value="60"
-                min="1"
-                max="120"
-              />
+
+            <!-- Manual mode -->
+            <div id="manual-detection" class="detection-section">
+              <div class="manual-info">
+                <h4>Chế độ thủ công</h4>
+                <p>
+                  Sử dụng các camera đang được stream để phát hiện khuôn mặt.
+                </p>
+                <div class="active-cameras-info">
+                  <span
+                    >Camera đang stream:
+                    <strong id="manual-camera-count">0 camera</strong></span
+                  >
+                  <div id="manual-camera-list" class="active-camera-names">
+                    <!-- Active camera names will be shown here -->
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="detection-duration">Thời gian (phút)</label>
+                <input
+                  type="number"
+                  id="detection-duration"
+                  value="60"
+                  min="1"
+                  max="120"
+                />
+              </div>
+              <button id="schedule-detection-btn">Bắt đầu phát hiện</button>
             </div>
-            <button id="schedule-detection-btn">Bắt đầu phát hiện</button>
+
+            <!-- Auto mode -->
+            <div
+              id="auto-detection"
+              class="detection-section"
+              style="display: none"
+            >
+              <div class="auto-schedule-info">
+                <h4>Chế độ tự động</h4>
+                <p>
+                  Hệ thống sẽ tự động check 20 camera mỗi 60 phút cho đến khi
+                  check hết 400 camera.
+                </p>
+                <div class="progress-info">
+                  <div class="progress-stats">
+                    <span
+                      >Tiến trình:
+                      <strong id="auto-progress">0/400 camera</strong></span
+                    >
+                    <span
+                      >Chu kỳ hiện tại:
+                      <strong id="current-cycle">0/20</strong></span
+                    >
+                  </div>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill"
+                      id="progress-fill"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="auto-interval"
+                  >Khoảng thời gian giữa các chu kỳ (phút)</label
+                >
+                <input
+                  type="number"
+                  id="auto-interval"
+                  value="60"
+                  min="30"
+                  max="180"
+                />
+              </div>
+              <button id="start-auto-detection-btn">
+                Bắt đầu phát hiện tự động
+              </button>
+              <button
+                id="stop-auto-detection-btn"
+                class="danger"
+                style="display: none"
+              >
+                Dừng phát hiện tự động
+              </button>
+            </div>
 
             <div
               class="active-detection"
@@ -88,6 +177,14 @@
             >
               <h4>Đang phát hiện khuôn mặt</h4>
               <p id="detection-status"></p>
+              <div class="detection-progress" id="detection-progress">
+                <div class="time-remaining">
+                  <span
+                    >Thời gian còn lại:
+                    <strong id="time-remaining">--:--</strong></span
+                  >
+                </div>
+              </div>
               <button id="stop-detection-btn" class="danger">
                 Dừng phát hiện
               </button>
@@ -197,6 +294,12 @@
       // Camera Management Variables
       let currentEditingCamera = null;
 
+      // Detection Variables
+      let selectedCamerasForDetection = new Set();
+      let autoDetectionInterval = null;
+      let autoDetectionProgress = 0;
+      let currentDetectionTimer = null;
+
       // DOM Elements
       const cameraList = document.getElementById("camera-list");
       const cameraGrid = document.getElementById("camera-grid");
@@ -212,6 +315,31 @@
       const stopDetectionBtn = document.getElementById("stop-detection-btn");
       const detectionStatus = document.getElementById("detection-status");
       const activeDetection = document.querySelector(".active-detection");
+
+      // New Detection DOM Elements
+      const cameraCheckboxList = document.getElementById(
+        "camera-checkbox-list"
+      );
+      const selectedCountEl = document.getElementById("selected-count");
+      const selectAllBtn = document.getElementById("select-all-cameras");
+      const clearSelectionBtn = document.getElementById("clear-selection");
+      const manualDetectionSection =
+        document.getElementById("manual-detection");
+      const autoDetectionSection = document.getElementById("auto-detection");
+      const startAutoDetectionBtn = document.getElementById(
+        "start-auto-detection-btn"
+      );
+      const stopAutoDetectionBtn = document.getElementById(
+        "stop-auto-detection-btn"
+      );
+      const autoProgressEl = document.getElementById("auto-progress");
+      const currentCycleEl = document.getElementById("current-cycle");
+      const progressFillEl = document.getElementById("progress-fill");
+      const timeRemainingEl = document.getElementById("time-remaining");
+      const manualCameraCountEl = document.getElementById(
+        "manual-camera-count"
+      );
+      const manualCameraListEl = document.getElementById("manual-camera-list");
 
       // DOM Elements for camera management
       const cameraForm = document.getElementById("camera-form");
@@ -362,14 +490,329 @@
 
       // Populate detection cameras select
       function populateDetectionCameras() {
-        detectionCamerasSelect.innerHTML = "";
+        // This function is no longer needed for the new UI
+        // Manual mode uses activeStreams, auto mode doesn't need selection
+      }
 
-        Object.values(cameras).forEach((camera) => {
-          const option = document.createElement("option");
-          option.value = camera.id;
-          option.textContent = `${camera.name} (${camera.location})`;
-          detectionCamerasSelect.appendChild(option);
+      // Update selected camera count
+      function updateSelectedCount() {
+        selectedCountEl.textContent = `${selectedCamerasForDetection.size}/20 camera được chọn`;
+      }
+
+      // Detection mode handling
+      function handleDetectionModeChange() {
+        const selectedMode = document.querySelector(
+          'input[name="detection-mode"]:checked'
+        ).value;
+
+        if (selectedMode === "manual") {
+          manualDetectionSection.style.display = "block";
+          autoDetectionSection.style.display = "none";
+
+          // Enable camera selection in sidebar
+          cameraList.classList.remove("disabled");
+
+          // Update manual mode info
+          updateManualModeInfo();
+        } else {
+          manualDetectionSection.style.display = "none";
+          autoDetectionSection.style.display = "block";
+
+          // Disable camera selection in sidebar to prevent exceeding 20 cameras
+          cameraList.classList.add("disabled");
+
+          updateAutoProgress();
+        }
+      }
+
+      // Update manual mode camera info
+      function updateManualModeInfo() {
+        const activeCameraCount = activeStreams.size;
+        manualCameraCountEl.textContent = `${activeCameraCount} camera`;
+
+        // Clear and populate active camera list
+        manualCameraListEl.innerHTML = "";
+
+        if (activeCameraCount === 0) {
+          manualCameraListEl.innerHTML =
+            '<div style="color: #666; font-style: italic;">Chưa có camera nào được chọn. Hãy chọn camera từ danh sách bên trái.</div>';
+        } else {
+          [...activeStreams].forEach((cameraId) => {
+            const camera = cameras[cameraId];
+            if (camera) {
+              const cameraItem = document.createElement("div");
+              cameraItem.className = "camera-name-item";
+              cameraItem.innerHTML = `
+                <span class="camera-status ${
+                  camera.status === "online"
+                    ? "status-online"
+                    : "status-offline"
+                }"></span>
+                ${camera.name} (${camera.location})
+              `;
+              manualCameraListEl.appendChild(cameraItem);
+            }
+          });
+        }
+      }
+
+      // Select all cameras
+      function selectAllCameras() {
+        selectedCamerasForDetection.clear();
+        const checkboxes = cameraCheckboxList.querySelectorAll(
+          'input[type="checkbox"]'
+        );
+        let count = 0;
+
+        checkboxes.forEach((checkbox) => {
+          if (count < 20) {
+            checkbox.checked = true;
+            selectedCamerasForDetection.add(checkbox.value);
+            checkbox.closest(".camera-checkbox-item").classList.add("selected");
+            count++;
+          }
         });
+
+        updateSelectedCount();
+      }
+
+      // Clear selection
+      function clearSelection() {
+        selectedCamerasForDetection.clear();
+        const checkboxes = cameraCheckboxList.querySelectorAll(
+          'input[type="checkbox"]'
+        );
+
+        checkboxes.forEach((checkbox) => {
+          checkbox.checked = false;
+          checkbox
+            .closest(".camera-checkbox-item")
+            .classList.remove("selected");
+        });
+
+        updateSelectedCount();
+      }
+
+      // Update auto detection progress
+      function updateAutoProgress() {
+        autoProgressEl.textContent = `${autoDetectionProgress}/400 camera`;
+        const progressPercent = (autoDetectionProgress / 400) * 100;
+        progressFillEl.style.width = `${progressPercent}%`;
+      }
+
+      // Start auto detection
+      async function startAutoDetection() {
+        const interval = parseInt(
+          document.getElementById("auto-interval").value
+        );
+
+        if (isNaN(interval) || interval < 30 || interval > 180) {
+          showToast("Khoảng thời gian phải từ 30 đến 180 phút", "warning");
+          return;
+        }
+
+        // Reset progress if starting fresh
+        if (autoDetectionProgress >= 400) {
+          autoDetectionProgress = 0;
+          updateAutoProgress();
+        }
+
+        // Clear manual camera selections when starting auto detection
+        const previousStreams = [...activeStreams];
+        for (const cameraId of previousStreams) {
+          await fetch("/api/stop-stream", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ camera_id: cameraId }),
+          });
+        }
+        activeStreams.clear();
+        saveActiveStreams();
+        renderCameraGrid();
+        updateActiveCount();
+
+        startAutoDetectionBtn.style.display = "none";
+        stopAutoDetectionBtn.style.display = "inline-block";
+
+        showToast(
+          "Đã bắt đầu phát hiện tự động! Camera manual đã được bỏ chọn.",
+          "success"
+        );
+
+        // Start the auto detection cycle
+        await runAutoDetectionCycle(interval);
+      }
+
+      // Stop auto detection
+      function stopAutoDetection() {
+        if (autoDetectionInterval) {
+          clearInterval(autoDetectionInterval);
+          autoDetectionInterval = null;
+        }
+
+        if (currentDetectionTimer) {
+          clearTimeout(currentDetectionTimer);
+          currentDetectionTimer = null;
+        }
+
+        // Clear current auto detection cameras from streams
+        activeStreams.clear();
+        saveActiveStreams();
+        renderCameraGrid();
+        updateActiveCount();
+
+        startAutoDetectionBtn.style.display = "inline-block";
+        stopAutoDetectionBtn.style.display = "none";
+
+        activeDetection.style.display = "none";
+
+        showToast("Đã dừng phát hiện tự động", "info");
+      }
+
+      // Run auto detection cycle
+      async function runAutoDetectionCycle(interval) {
+        const cameraIds = Object.keys(cameras);
+
+        const runCycle = async () => {
+          if (autoDetectionProgress >= 400) {
+            stopAutoDetection();
+            showToast("Đã hoàn thành phát hiện tất cả 400 camera!", "success");
+            return;
+          }
+
+          // Get next 20 cameras
+          const startIndex = autoDetectionProgress;
+          const endIndex = Math.min(startIndex + 20, 400);
+          const camerasForThisCycle = cameraIds.slice(startIndex, endIndex);
+
+          if (camerasForThisCycle.length === 0) {
+            stopAutoDetection();
+            return;
+          }
+
+          // Clear previous cycle cameras from streams
+          const previousStreams = [...activeStreams];
+          for (const cameraId of previousStreams) {
+            await fetch("/api/stop-stream", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ camera_id: cameraId }),
+            });
+          }
+          activeStreams.clear();
+
+          // Add current cycle cameras to active streams for display
+          for (const cameraId of camerasForThisCycle) {
+            if (cameras[cameraId]) {
+              activeStreams.add(cameraId);
+              // Start stream for display
+              await fetch("/api/start-stream", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ camera_id: cameraId }),
+              });
+            }
+          }
+
+          // Update UI to show current cycle cameras
+          saveActiveStreams();
+          renderCameraGrid();
+          updateActiveCount();
+
+          // Update current cycle info
+          currentCycleEl.textContent = `${camerasForThisCycle.length}/20`;
+
+          // Show active detection
+          activeDetection.style.display = "block";
+          detectionStatus.textContent = `Đang phát hiện khuôn mặt tự động: Camera ${
+            startIndex + 1
+          } - ${endIndex} (Chu kỳ ${Math.ceil(endIndex / 20)}/20)`;
+
+          // Start detection for this cycle
+          try {
+            const response = await fetch("/api/schedule-detection", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                camera_ids: camerasForThisCycle,
+                duration: 60, // Fixed 60 minutes for auto mode
+              }),
+            });
+
+            const result = await response.json();
+
+            if (result.schedule_id) {
+              // Start countdown timer
+              startCountdownTimer(60);
+
+              // Wait for detection to complete
+              currentDetectionTimer = setTimeout(() => {
+                autoDetectionProgress = endIndex;
+                updateAutoProgress();
+
+                showToast(
+                  `Hoàn thành chu kỳ ${Math.ceil(endIndex / 20)}/20`,
+                  "success"
+                );
+
+                // Schedule next cycle if not at the end
+                if (autoDetectionProgress < 400) {
+                  showToast(
+                    `Chờ ${interval} phút trước chu kỳ tiếp theo...`,
+                    "info"
+                  );
+                } else {
+                  // Clear streams when completely done
+                  activeStreams.clear();
+                  saveActiveStreams();
+                  renderCameraGrid();
+                  updateActiveCount();
+                  activeDetection.style.display = "none";
+                }
+              }, 60 * 60 * 1000); // 60 minutes
+            }
+          } catch (error) {
+            console.error("Error in auto detection cycle:", error);
+            showToast("Lỗi trong chu kỳ phát hiện tự động", "error");
+          }
+        };
+
+        // Run first cycle immediately
+        await runCycle();
+
+        // Set interval for subsequent cycles
+        autoDetectionInterval = setInterval(runCycle, interval * 60 * 1000);
+      }
+
+      // Start countdown timer
+      function startCountdownTimer(minutes) {
+        let timeLeft = minutes * 60; // Convert to seconds
+
+        const updateTimer = () => {
+          const mins = Math.floor(timeLeft / 60);
+          const secs = timeLeft % 60;
+          timeRemainingEl.textContent = `${mins
+            .toString()
+            .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+
+          if (timeLeft <= 0) {
+            timeRemainingEl.textContent = "00:00";
+            return;
+          }
+
+          timeLeft--;
+          setTimeout(updateTimer, 1000);
+        };
+
+        updateTimer();
       }
 
       // Toggle camera stream
@@ -428,10 +871,17 @@
 
         if (activeStreams.size === 0) {
           document.getElementById("stream-alert").style.display = "block";
+          updateManualModeInfo(); // Update manual mode info when no cameras
           return;
         }
 
         document.getElementById("stream-alert").style.display = "none";
+
+        // Check if we're in auto detection mode
+        const selectedMode = document.querySelector(
+          'input[name="detection-mode"]:checked'
+        )?.value;
+        const isAutoMode = selectedMode === "auto";
 
         [...activeStreams].forEach((cameraId) => {
           const camera = cameras[cameraId];
@@ -441,19 +891,30 @@
           }
 
           const cameraCard = document.createElement("div");
-          cameraCard.className = "camera-card";
+          cameraCard.className = `camera-card ${
+            isAutoMode ? "auto-detection" : ""
+          }`;
 
           cameraCard.innerHTML = `
             <div class="camera-feed">
-              <img src="/static/images/camera-placeholder.svg" alt="${camera.name}" id="feed-${camera.id}">
+              <img src="/static/images/camera-placeholder.svg" alt="${
+                camera.name
+              }" id="feed-${camera.id}">
+              ${isAutoMode ? '<div class="auto-badge">🤖 Tự động</div>' : ""}
             </div>
             <div class="camera-info">
               <h3>${camera.name}</h3>
               <div class="camera-details">IP: ${camera.ip}</div>
               <div class="camera-details">Vị trí: ${camera.location}</div>
               <div class="camera-actions">
-                <button class="secondary" onclick="event.stopPropagation(); toggleFullscreen('${camera.id}')">Phóng to</button>
-                <button class="danger" onclick="event.stopPropagation(); removeCameraFromStream('${camera.id}')">Dừng</button>
+                <button class="secondary" onclick="event.stopPropagation(); toggleFullscreen('${
+                  camera.id
+                }')">Phóng to</button>
+                ${
+                  !isAutoMode
+                    ? `<button class="danger" onclick="event.stopPropagation(); removeCameraFromStream('${camera.id}')">Dừng</button>`
+                    : '<span class="auto-mode-note">Chế độ tự động</span>'
+                }
               </div>
             </div>
           `;
@@ -464,6 +925,9 @@
           // Đây là mô phỏng bằng cách cập nhật ảnh mỗi 1 giây
           simulateCameraFeed(camera.id);
         });
+
+        // Update manual mode info when camera grid changes
+        updateManualModeInfo();
       }
 
       // Render detection results
@@ -541,13 +1005,14 @@
 
       // Schedule face detection
       scheduleDetectionBtn.addEventListener("click", async () => {
-        const selectedCameras = Array.from(
-          detectionCamerasSelect.selectedOptions
-        ).map((option) => option.value);
+        const selectedCameras = [...activeStreams]; // Use active streams instead of selectedCamerasForDetection
         const duration = parseInt(detectionDuration.value);
 
         if (selectedCameras.length === 0) {
-          showToast("Vui lòng chọn ít nhất 1 camera.", "warning");
+          showToast(
+            "Vui lòng chọn ít nhất 1 camera từ danh sách camera bên trái.",
+            "warning"
+          );
           return;
         }
 
@@ -582,6 +1047,9 @@
 
             // Disable schedule button
             scheduleDetectionBtn.disabled = true;
+
+            // Start countdown timer
+            startCountdownTimer(duration);
 
             showToast(
               `Đã bắt đầu phát hiện khuôn mặt trên ${selectedCameras.length} camera`,
@@ -748,6 +1216,20 @@
         saveCameraBtn.addEventListener("click", saveCamera);
         cancelEditBtn.addEventListener("click", clearForm);
 
+        // Detection mode event listeners
+        document
+          .querySelectorAll('input[name="detection-mode"]')
+          .forEach((radio) => {
+            radio.addEventListener("change", handleDetectionModeChange);
+          });
+
+        // Auto detection event listeners
+        startAutoDetectionBtn.addEventListener("click", startAutoDetection);
+        stopAutoDetectionBtn.addEventListener("click", stopAutoDetection);
+
+        // Initialize detection mode
+        handleDetectionModeChange();
+
         // Refresh cameras button
         document
           .getElementById("refresh-cameras")
@@ -775,6 +1257,18 @@
       // Add camera to stream (without removing others)
       async function addCameraToStream(cameraId) {
         try {
+          // Check if in auto detection mode and prevent adding cameras
+          const selectedMode = document.querySelector(
+            'input[name="detection-mode"]:checked'
+          )?.value;
+          if (selectedMode === "auto") {
+            showToast(
+              "Không thể thêm camera khi đang ở chế độ phát hiện tự động",
+              "warning"
+            );
+            return;
+          }
+
           // Check if camera is already streaming
           if (activeStreams.has(cameraId)) {
             return; // Already streaming, do nothing
