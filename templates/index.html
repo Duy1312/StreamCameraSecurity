@@ -389,8 +389,9 @@
           } else {
             // Check if we're at the limit
             if (activeStreams.size >= 20) {
-              alert(
-                "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước."
+              showToast(
+                "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước.",
+                "warning"
               );
               return;
             }
@@ -546,17 +547,17 @@
         const duration = parseInt(detectionDuration.value);
 
         if (selectedCameras.length === 0) {
-          alert("Vui lòng chọn ít nhất 1 camera.");
+          showToast("Vui lòng chọn ít nhất 1 camera.", "warning");
           return;
         }
 
         if (selectedCameras.length > 20) {
-          alert("Không thể phát hiện quá 20 camera cùng lúc.");
+          showToast("Không thể phát hiện quá 20 camera cùng lúc.", "warning");
           return;
         }
 
         if (isNaN(duration) || duration < 1 || duration > 120) {
-          alert("Thời gian phải từ 1 đến 120 phút.");
+          showToast("Thời gian phải từ 1 đến 120 phút.", "warning");
           return;
         }
 
@@ -582,11 +583,17 @@
             // Disable schedule button
             scheduleDetectionBtn.disabled = true;
 
+            showToast(
+              `Đã bắt đầu phát hiện khuôn mặt trên ${selectedCameras.length} camera`,
+              "success"
+            );
+
             // Set a timer to update UI when detection completes
             setTimeout(() => {
               activeDetection.style.display = "none";
               scheduleDetectionBtn.disabled = false;
               fetchDetectionResults();
+              showToast("Phát hiện khuôn mặt đã hoàn thành", "info");
             }, duration * 60 * 1000);
           }
         } catch (error) {
@@ -648,10 +655,74 @@
         }
       });
 
+      // Toast notification function
+      function showToast(message, type = "success") {
+        // Remove existing toast
+        const existingToast = document.querySelector(".toast");
+        if (existingToast) {
+          existingToast.remove();
+        }
+
+        // Create new toast
+        const toast = document.createElement("div");
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+
+        // Add to body
+        document.body.appendChild(toast);
+
+        // Show toast
+        setTimeout(() => {
+          toast.classList.add("show");
+        }, 100);
+
+        // Hide and remove toast
+        setTimeout(() => {
+          toast.classList.remove("show");
+          setTimeout(() => {
+            toast.remove();
+          }, 300);
+        }, 3000);
+      }
+
       // Refresh cameras
       async function refreshCameras() {
-        await fetchCameras();
-        await fetchActiveStreams();
+        const refreshBtn = document.getElementById("refresh-cameras");
+        const originalText = refreshBtn.textContent;
+
+        try {
+          // Show loading state
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = "Đang tải...";
+          refreshBtn.style.opacity = "0.6";
+
+          // Clear current data
+          cameras = {};
+          activeStreams.clear();
+
+          // Fetch fresh data
+          console.log("Refreshing cameras...");
+          await fetchCameras();
+          await fetchActiveStreams();
+          await fetchDetectionResults();
+
+          // Show success message
+          const originalCount = Object.keys(cameras).length;
+          showToast(
+            `Làm mới thành công! Đã tải ${originalCount} camera.`,
+            "success"
+          );
+
+          console.log("Refresh completed successfully");
+        } catch (error) {
+          console.error("Error refreshing cameras:", error);
+          showToast("Có lỗi xảy ra khi làm mới dữ liệu", "error");
+        } finally {
+          // Restore button state
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = originalText;
+          refreshBtn.style.opacity = "1";
+        }
       }
 
       // Stop all cameras
@@ -711,8 +782,9 @@
 
           // Check if we're at the limit
           if (activeStreams.size >= 20) {
-            alert(
-              "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước."
+            showToast(
+              "Không thể stream quá 20 camera cùng lúc. Vui lòng dừng một camera khác trước.",
+              "warning"
             );
             return;
           }
@@ -816,9 +888,15 @@
         const status = cameraStatusSelect.value;
 
         if (!name || !ip || !location) {
-          alert("Vui lòng điền đầy đủ thông tin camera");
+          showToast("Vui lòng điền đầy đủ thông tin camera", "warning");
           return;
         }
+
+        // Disable save button during request
+        saveCameraBtn.disabled = true;
+        saveCameraBtn.textContent = currentEditingCamera
+          ? "Đang cập nhật..."
+          : "Đang lưu...";
 
         try {
           let response;
@@ -845,20 +923,27 @@
           const result = await response.json();
 
           if (result.success) {
-            alert(
+            showToast(
               currentEditingCamera
                 ? "Camera đã được cập nhật!"
-                : "Camera mới đã được thêm!"
+                : "Camera mới đã được thêm!",
+              "success"
             );
             clearForm();
             await fetchCameras();
             renderManagementList();
           } else {
-            alert("Lỗi: " + result.error);
+            showToast("Lỗi: " + result.error, "error");
           }
         } catch (error) {
           console.error("Error saving camera:", error);
-          alert("Có lỗi xảy ra khi lưu camera");
+          showToast("Có lỗi xảy ra khi lưu camera", "error");
+        } finally {
+          // Restore save button
+          saveCameraBtn.disabled = false;
+          saveCameraBtn.textContent = currentEditingCamera
+            ? "Cập nhật Camera"
+            : "Lưu Camera";
         }
       }
 
@@ -893,7 +978,7 @@
           const result = await response.json();
 
           if (result.success) {
-            alert("Camera đã được xóa!");
+            showToast("Camera đã được xóa!", "success");
             await fetchCameras();
             renderManagementList();
 
@@ -905,11 +990,11 @@
               updateActiveCount();
             }
           } else {
-            alert("Lỗi: " + result.error);
+            showToast("Lỗi: " + result.error, "error");
           }
         } catch (error) {
           console.error("Error deleting camera:", error);
-          alert("Có lỗi xảy ra khi xóa camera");
+          showToast("Có lỗi xảy ra khi xóa camera", "error");
         }
       }
     </script>

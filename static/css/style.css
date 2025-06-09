@@ -437,3 +437,37 @@ button.danger:hover {
 .btn-delete:hover {
   background-color: #c82333;
 }
+
+/* Toast Notification */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background-color: #28a745;
+  color: white;
+  padding: 12px 20px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 9999;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: all 0.3s ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast.error {
+  background-color: #dc3545;
+}
+
+.toast.warning {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+.toast.info {
+  background-color: #17a2b8;
+}
