@@ -146,7 +146,7 @@ class ProductionConfig(Config):
         
         # Performance monitoring
         try:
-            from flask import g
+            from flask import g, request
             import time
             
             @app.before_request
@@ -155,10 +155,19 @@ class ProductionConfig(Config):
             
             @app.after_request
             def after_request(response):
-                if hasattr(g, 'start_time'):
-                    total_time = time.time() - g.start_time
-                    if total_time > 1.0:  # Log slow requests
-                        app.logger.warning(f"Slow request: {total_time:.2f}s for {request.url}")
+                try:
+                    if hasattr(g, 'start_time'):
+                        total_time = time.time() - g.start_time
+                        if total_time > 1.0:  # Log slow requests
+                            # Safely access request.url with proper error handling
+                            try:
+                                url = request.url
+                                app.logger.warning(f"Slow request: {total_time:.2f}s for {url}")
+                            except RuntimeError:
+                                # If request context is not available, just log the timing
+                                app.logger.warning(f"Slow request: {total_time:.2f}s")
+                except Exception as e:
+                    app.logger.error(f"Error in performance monitoring: {e}")
                 return response
         except Exception as e:
             app.logger.error(f"Error setting up performance monitoring: {e}")

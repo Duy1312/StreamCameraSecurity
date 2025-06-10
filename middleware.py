@@ -67,16 +67,27 @@ class RequestLoggingMiddleware:
     def teardown_request(self, exception=None):
         """Cleanup sau request"""
         if exception:
-            performance_logger.logger.error(
-                "Request failed with exception",
-                extra={
-                    "request_id": getattr(g, 'request_id', 'unknown'),
-                    "exception": str(exception),
-                    "method": request.method,
-                    "url": request.url
-                },
-                exc_info=True
-            )
+            try:
+                performance_logger.logger.error(
+                    "Request failed with exception",
+                    extra={
+                        "request_id": getattr(g, 'request_id', 'unknown'),
+                        "exception": str(exception),
+                        "method": getattr(request, 'method', 'unknown'),
+                        "url": getattr(request, 'url', 'unknown')
+                    },
+                    exc_info=True
+                )
+            except RuntimeError:
+                # If no request context available, log without request details
+                performance_logger.logger.error(
+                    "Request failed with exception (no context)",
+                    extra={
+                        "request_id": getattr(g, 'request_id', 'unknown'),
+                        "exception": str(exception)
+                    },
+                    exc_info=True
+                )
 
 class CompressionMiddleware:
     """Middleware để compress API responses"""
